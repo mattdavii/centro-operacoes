@@ -1,0 +1,1285 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Centro de Operações</title>
+<link rel="stylesheet" href="vendor/leaflet/leaflet.css">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#050a18">
+<link rel="icon" href="icone-192.png">
+<style>
+  :root {
+    --fundo: #03060f; --painel: #070d1d; --painel2: #0b1428; --linha: #16264d; --linha-forte: #2b4a99;
+    --texto: #e2e8f0; --fraco: #7d8fb5; --rotulo: #7fb4ff; --titulo: #dbeafe;
+    --azul: #56ccff; --roxo: #b49bff; --verde: #3ee08a; --amarelo: #fbbf24; --vermelho: #ff4d5e; --laranja: #fb923c; --cinza: #475569;
+    --mono: "JetBrains Mono", "Cascadia Mono", "Fira Code", ui-monospace, monospace;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }  /* o display:grid das seções não pode vencer o "hidden" */
+  html, body { height: 100%; }
+  body { margin: 0; background: radial-gradient(1200px 600px at 70% -10%, #0c1a3a 0%, transparent 60%), var(--fundo);
+         color: var(--texto); font: 13px/1.4 system-ui, "Segoe UI", Roboto, sans-serif; overflow-x: hidden; }
+  button { font: inherit; cursor: pointer; border-radius: 6px; border: 1px solid var(--linha-forte); background: #0d1938; color: var(--texto); padding: 4px 9px; font-size: 11px; letter-spacing: .3px; }
+  button:hover { background: #142553; border-color: #4169d6; }
+  button.ativo { color: var(--verde); border-color: #1e7a4c; background: #0b2a1d; }
+  .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+
+  /* ---------- barra superior ---------- */
+  header { display: grid; grid-template-columns: auto 1fr auto auto; gap: 18px; align-items: center; padding: 10px 18px;
+           border-bottom: 1px solid var(--linha); background: linear-gradient(180deg, #081128, #050a18); position: sticky; top: 0; z-index: 5; }
+  .marca { display: flex; align-items: center; gap: 12px; }
+  .radar { width: 30px; height: 30px; border-radius: 50%; border: 2px solid var(--azul); position: relative; box-shadow: 0 0 14px #56ccff55; }
+  .radar::after { content: ""; position: absolute; inset: 7px; border-radius: 50%; background: var(--azul); animation: pulso 2s infinite; }
+  .marca h1 { margin: 0; font-size: 18px; letter-spacing: 3px; font-weight: 700; color: var(--titulo); }
+  .marca small { display: block; font-size: 10px; letter-spacing: 2.5px; color: var(--rotulo); font-weight: 600; }
+  .plantao { justify-self: center; display: flex; align-items: center; gap: 12px; padding: 6px 14px; border-radius: 10px; border: 1px solid #7f1d2a;
+             background: linear-gradient(90deg, #2a0710, #160510); box-shadow: 0 0 0 0 #ff4d5e66; animation: brilho 2.4s infinite; }
+  .plantao.inativo { border-color: var(--linha); background: var(--painel); animation: none; }
+  .plantao b { color: #ffd5da; letter-spacing: 2px; font-size: 12px; }
+  .plantao span { color: #f9a8b4; font-size: 11px; }
+  .plantao .resta { font-family: var(--mono); color: #fff; font-size: 13px; }
+  .relogio { text-align: right; }
+  .relogio .hora { font-family: var(--mono); font-size: 30px; font-weight: 600; letter-spacing: 1px; color: #fff; line-height: 1; text-shadow: 0 0 18px #56ccff55; }
+  .relogio .data { font-size: 10px; letter-spacing: 1.5px; color: var(--rotulo); text-transform: uppercase; margin-top: 3px; }
+  .estado { display: flex; flex-direction: column; gap: 5px; align-items: flex-end; }
+  .chips { display: flex; gap: 10px; align-items: center; }
+  .chip { display: inline-flex; align-items: center; gap: 6px; font-size: 10px; font-weight: 700; letter-spacing: 1px; color: var(--fraco); }
+  .led { width: 8px; height: 8px; border-radius: 50%; background: var(--cinza); }
+  .led.ok { background: var(--verde); box-shadow: 0 0 8px var(--verde); }
+  .led.ruim { background: var(--vermelho); box-shadow: 0 0 8px var(--vermelho); animation: pisca 1s infinite; }
+
+  /* ---------- indicadores ---------- */
+  .kpis { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; padding: 12px 18px 0; }
+  .kpi { background: var(--painel); border: 1px solid var(--linha); border-radius: 10px; padding: 9px 13px; position: relative; overflow: hidden; }
+  .kpi::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; background: var(--cor, var(--azul)); box-shadow: 0 0 12px var(--cor, var(--azul)); }
+  .kpi .v { font-family: var(--mono); font-size: 30px; font-weight: 600; line-height: 1.05; color: var(--cor, var(--azul)); }
+  .kpi .r { font-size: 10px; letter-spacing: 1.2px; color: var(--rotulo); font-weight: 700; }
+  .kpi .s { font-size: 11px; color: var(--fraco); margin-top: 1px; }
+  .kpi.alarme { animation: alarmeKpi 1.4s infinite; }
+
+  /* ---------- grade principal ---------- */
+  main { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr) minmax(0, 1fr); gap: 12px; padding: 12px 18px 18px; }
+  .painel { background: var(--painel); border: 1px solid var(--linha); border-radius: 12px; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+  .painel > h2 { margin: 0; padding: 10px 13px; font-size: 11px; letter-spacing: 1.6px; color: var(--rotulo); font-weight: 700; border-bottom: 1px solid var(--linha);
+                 display: flex; align-items: center; gap: 8px; }
+  .painel > h2 .qtd { font-family: var(--mono); background: #12224a; color: var(--titulo); border-radius: 8px; padding: 0 7px; font-size: 11px; }
+  .painel > h2 .dir { margin-left: auto; display: flex; gap: 5px; }
+  .corpo { padding: 10px 12px; overflow: auto; }
+  .coluna { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+  .alto { max-height: calc(100vh - 230px); }
+  .medio { max-height: 46vh; }
+  .vazio { color: var(--fraco); font-size: 12px; padding: 8px 2px; }
+  .aba { padding: 2px 8px; font-size: 10px; border-color: var(--linha); background: transparent; color: var(--fraco); }
+  .aba.sel { color: var(--titulo); border-color: var(--linha-forte); background: #12224a; }
+
+  /* ocorrências */
+  .oc { display: grid; grid-template-columns: 4px 1fr auto; gap: 0 10px; padding: 8px 10px 8px 0; border-bottom: 1px solid #0f1b38; }
+  .oc .barra { border-radius: 3px; background: var(--cor); box-shadow: 0 0 10px var(--cor); }
+  .oc.critico { --cor: var(--vermelho); } .oc.alerta { --cor: var(--amarelo); } .oc.normalizado { --cor: var(--verde); }
+  .oc.normalizado .barra { box-shadow: none; opacity: .6; }
+  .oc.inatividade { --cor: #64748b; } .oc.inatividade .usina { color: var(--fraco); }
+  .oc.nova { background: linear-gradient(90deg, #3a0b14, transparent 70%); }
+  .oc .topo { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+  .oc .usina { font-weight: 700; color: var(--titulo); font-size: 13px; }
+  .sev { font-size: 9px; font-weight: 800; letter-spacing: 1px; padding: 1px 6px; border-radius: 4px; color: #0b0b0b; background: var(--cor); }
+  .oc .texto { color: #c3cde3; font-size: 12px; margin-top: 3px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .oc .quem { color: var(--fraco); font-size: 11px; margin-top: 3px; }
+  .oc .norm { color: var(--verde); font-size: 11px; margin-top: 3px; }
+  .oc .lado { text-align: right; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+  .oc .tempo { font-family: var(--mono); font-size: 14px; font-weight: 600; color: var(--cor); }
+  .oc .hora { font-family: var(--mono); font-size: 10px; color: var(--fraco); }
+
+  /* quadro de usinas */
+  .quadro { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 6px; }
+  .usi { border: 1px solid var(--linha); border-radius: 7px; padding: 6px 8px; background: var(--painel2); position: relative; min-height: 50px; cursor: default; }
+  .usi::before { content: ""; position: absolute; top: 6px; right: 7px; width: 8px; height: 8px; border-radius: 50%; background: var(--cor); box-shadow: 0 0 8px var(--cor); }
+  .usi.critico { --cor: var(--vermelho); border-color: #6b1220; background: #1b0710; } .usi.critico::before { animation: pisca 1s infinite; }
+  .usi.alerta { --cor: var(--amarelo); border-color: #5c4310; background: #171206; }
+  .usi.normalizado { --cor: var(--verde); } .usi.ativa { --cor: #2b7a5a; } .usi.quieta { --cor: var(--cinza); opacity: .55; }
+  .usi .n { font-size: 11px; font-weight: 700; color: var(--titulo); padding-right: 12px; line-height: 1.2; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .usi .m { font-family: var(--mono); font-size: 10px; color: var(--fraco); margin-top: 3px; }
+  .legenda { display: flex; gap: 12px; flex-wrap: wrap; font-size: 10px; color: var(--fraco); margin-top: 8px; }
+  .legenda i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; vertical-align: -1px; }
+
+  /* atividade */
+  .grafico { display: flex; align-items: flex-end; gap: 3px; height: 70px; padding-top: 4px; }
+  .grafico div { flex: 1; background: linear-gradient(180deg, var(--azul), #1d4f7a); border-radius: 2px 2px 0 0; min-height: 2px; opacity: .85; position: relative; }
+  .grafico div.agora { background: linear-gradient(180deg, #fff, var(--azul)); }
+  .eixo { display: flex; justify-content: space-between; font-family: var(--mono); font-size: 9px; color: var(--fraco); margin-top: 3px; }
+
+  /* aguardando */
+  .ag { border: 1px solid #13234a; border-left: 3px solid var(--cor, var(--azul)); border-radius: 8px; padding: 7px 9px; margin-bottom: 7px; background: var(--painel2); }
+  .ag.urgente { --cor: var(--vermelho); } .ag.atencao { --cor: var(--amarelo); } .ag.calmo { --cor: var(--cinza); opacity: .75; }
+  .ag .topo { display: flex; gap: 6px; align-items: baseline; }
+  .ag .nome { font-weight: 700; color: var(--titulo); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+  .ag .espera { margin-left: auto; font-family: var(--mono); font-size: 12px; font-weight: 700; color: var(--cor, var(--azul)); white-space: nowrap; }
+  .tag { font-size: 9px; font-weight: 800; letter-spacing: .6px; padding: 1px 5px; border-radius: 4px; background: #12224a; color: var(--rotulo); white-space: nowrap; }
+  .tag.grupo { color: var(--roxo); } .tag.marcou { color: #111; background: var(--amarelo); }
+  .ag .previa { font-size: 11.5px; color: var(--fraco); margin-top: 4px; }
+  .ag .previa div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ag .previa b { color: #c7d2fe; font-weight: 600; }
+  .ag .previa .eu { color: #5c6f99; }
+  .acoes { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 6px; }
+  .acoes button { padding: 2px 7px; font-size: 10px; }
+  .menu { position: relative; display: inline-block; }
+  .menu-opcoes { display: none; position: absolute; z-index: 6; top: 100%; left: 0; margin-top: 3px; background: #0b1428; border: 1px solid var(--linha-forte); border-radius: 6px; padding: 3px; min-width: 110px; }
+  .menu.aberto .menu-opcoes { display: block; }
+  .menu-opcoes button { display: block; width: 100%; text-align: left; border: 0; background: transparent; }
+  details summary { cursor: pointer; color: var(--fraco); font-size: 11px; padding: 4px 0; }
+
+  /* chamados / tarefas */
+  .ch { border-bottom: 1px solid #0f1b38; padding: 7px 2px; }
+  .ch .topo { display: flex; gap: 7px; align-items: baseline; }
+  .ch .u { font-weight: 700; color: var(--titulo); font-size: 12px; }
+  .ch .d { margin-left: auto; font-family: var(--mono); font-size: 10px; color: var(--fraco); white-space: nowrap; }
+  .ch .a { font-size: 12px; color: #c3cde3; margin-top: 2px; }
+  .ch .x { font-size: 11px; color: var(--fraco); margin-top: 2px; }
+  .st { font-size: 9px; font-weight: 800; letter-spacing: .5px; padding: 1px 5px; border-radius: 4px; }
+  .st.pendente { background: #3a1018; color: #ff8a96; } .st.andamento { background: #3a2c0a; color: var(--amarelo); } .st.ok { background: #0b2a1d; color: var(--verde); }
+
+  /* rodapé ao vivo */
+  .aovivo { margin: 0 18px 18px; display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 12px; }
+  .feed { font-size: 12px; }
+  .feed .l { display: grid; grid-template-columns: 44px 170px 1fr; gap: 8px; padding: 3px 0; border-bottom: 1px dashed #0f1b38; }
+  .feed .l .h { font-family: var(--mono); color: var(--fraco); font-size: 11px; }
+  .feed .l .g { color: var(--roxo); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+  .feed .l .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #c3cde3; }
+  .feed .l .t b { color: var(--titulo); font-weight: 600; }
+  .boletim { white-space: pre-wrap; font-size: 11.5px; color: #c3cde3; font-family: var(--mono); line-height: 1.45; }
+  .aviso { margin: 10px 18px 0; padding: 8px 12px; border-radius: 8px; background: #2a0710; color: #fecaca; border: 1px solid #7f1d2a; font-size: 12px; }
+
+  /* plantão */
+  .plantao button { padding: 4px 10px; font-size: 10px; font-weight: 700; letter-spacing: 1px; }
+  .plantao .iniciar { color: var(--verde); border-color: #1e7a4c; background: #0b2a1d; }
+  .plantao .finalizar { color: #ffd5da; border-color: #b4233a; background: #3a0b14; }
+  .plantao a { color: var(--rotulo); font-size: 10px; letter-spacing: .5px; }
+  .plantao .relatorio { color: #ffd5da; border-color: #7f1d2a; background: transparent; }
+  .vistas { display: inline-flex; border: 1px solid var(--linha-forte); border-radius: 7px; overflow: hidden; }
+  .vistas button { border: 0; border-radius: 0; background: transparent; color: var(--fraco); font-weight: 700; letter-spacing: 1px; }
+  .vistas button.sel { background: #12224a; color: var(--titulo); }
+  /* mapa */
+  #vista-mapa { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 12px; padding: 12px 18px 18px; }
+  #vista-mapa[hidden] { display: none; }
+  /* o Leaflet usa z-index até 1000 nas camadas: isolar o mapa num contexto próprio para ele não passar por cima
+     do topo fixo, da gaveta de detalhe e dos menus */
+  #mapa { position: relative; z-index: 0; isolation: isolate; height: calc(100vh - 210px); min-height: 420px; border-radius: 12px; border: 1px solid var(--linha); background: #0a1124; }
+  .leaflet-container { font: inherit; background: #0a1124; }
+  .leaflet-popup-content-wrapper, .leaflet-popup-tip { background: #0b1428; color: var(--texto); border: 1px solid var(--linha-forte); }
+  .leaflet-popup-content { margin: 10px 12px; font-size: 12px; line-height: 1.45; min-width: 220px; }
+  .leaflet-popup-content b { color: var(--titulo); }
+  .leaflet-control-layers { background: #0b1428; color: var(--texto); border: 1px solid var(--linha-forte) !important; }
+  .leaflet-control-zoom a { background: #0b1428 !important; color: var(--texto) !important; border-color: var(--linha) !important; }
+  .leaflet-control-attribution { background: #050a18cc !important; color: #56627d !important; }
+  .leaflet-control-attribution a { color: #7d8fb5 !important; }
+  .pino-pulso { border-radius: 50%; animation: pinoPulso 1.4s infinite; }
+  @keyframes pinoPulso { 0% { box-shadow: 0 0 0 0 #ff4d5eaa; } 70% { box-shadow: 0 0 0 16px #ff4d5e00; } 100% { box-shadow: 0 0 0 0 #ff4d5e00; } }
+  .mapa-lista .item-mapa { padding: 7px 8px; border-bottom: 1px solid #0f1b38; cursor: pointer; border-left: 3px solid var(--cor); margin-bottom: 4px; border-radius: 4px; background: var(--painel2); }
+  .mapa-lista .item-mapa:hover { background: #12224a; }
+  .mapa-lista .item-mapa.critico { --cor: var(--vermelho); } .mapa-lista .item-mapa.alerta { --cor: var(--amarelo); }
+  .mapa-lista .sem-local { opacity: .55; cursor: default; }
+  .proximos { margin-top: 6px; border-top: 1px solid var(--linha); padding-top: 6px; }
+  .proximos div { display: flex; justify-content: space-between; gap: 8px; }
+  .proximos span { font-family: var(--mono); color: var(--azul); }
+  .offline { background: #2a2107; border-color: #7a5a10; color: #fde68a; }
+  @media (max-width: 1000px) { #vista-mapa { grid-template-columns: 1fr; padding: 10px 12px; } #mapa { height: 60vh; } }
+
+  .no-app #btn-tela, .no-app .so-pc { display: none; }
+  .modal { position: fixed; z-index: 70; top: 50%; left: 50%; transform: translate(-50%, -50%); width: min(640px, 94vw);
+           background: #060c1c; border: 1px solid var(--linha-forte); border-radius: 14px; padding: 18px 20px; box-shadow: 0 20px 60px #000c; }
+  .modal h3 { margin: 0 0 12px; font-size: 14px; letter-spacing: 2px; color: var(--titulo); }
+  .modal .fechar { position: absolute; top: 10px; right: 12px; }
+  .modal-corpo { display: flex; gap: 18px; align-items: flex-start; flex-wrap: wrap; }
+  .modal ol { flex: 1; min-width: 220px; margin: 0; padding-left: 18px; font-size: 13px; line-height: 1.6; color: #c3cde3; }
+  .qr { background: #fff; padding: 10px; border-radius: 10px; line-height: 0; }
+  .qr svg { width: 220px; height: 220px; }
+  .nota-modal { width: 100%; font-size: 11.5px; color: var(--fraco); margin: 10px 0 0; }
+  #modal-fundo { z-index: 69; }
+  /* linha do tempo do plantão */
+  .tl-painel { grid-column: 1 / -1; }
+  .tl { position: relative; padding: 4px 12px 8px; }
+  .tl-eixo { position: relative; height: 16px; margin-left: 190px; border-bottom: 1px solid var(--linha); }
+  .tl-eixo span { position: absolute; transform: translateX(-50%); font-family: var(--mono); font-size: 9px; color: var(--fraco); }
+  .tl-linhas { max-height: 210px; overflow-y: auto; }
+  .tl-linha { display: grid; grid-template-columns: 182px 1fr; gap: 8px; align-items: center; height: 18px; cursor: pointer; }
+  .tl-linha:hover { background: #0c1730; }
+  .tl-nome { font-size: 11px; color: var(--texto); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: right; }
+  .tl-trilho { position: relative; height: 100%; }
+  .tl-barra { position: absolute; top: 5px; height: 8px; border-radius: 4px; min-width: 6px; background: var(--cor); }
+  .tl-barra.aberta { box-shadow: 0 0 8px var(--cor); }
+  .tl-agora { position: absolute; top: 0; bottom: 0; width: 1px; background: #fff8; pointer-events: none; }
+  .tl-agora::after { content: "agora"; position: absolute; top: -14px; left: 3px; font-size: 9px; color: #fffa; font-family: var(--mono); }
+  .tl-grade { position: absolute; top: 0; bottom: 0; width: 1px; background: #16264d88; pointer-events: none; }
+  .legenda-st { display: flex; gap: 12px; font-size: 10px; color: var(--fraco); margin-left: auto; font-weight: 600; letter-spacing: .5px; }
+  .legenda-st i { display: inline-block; width: 10px; height: 6px; border-radius: 3px; margin-right: 4px; vertical-align: 1px; }
+  /* indicadores */
+  #vista-indicadores { padding: 12px 18px 24px; }
+  #vista-indicadores[hidden] { display: none; }
+  .filtros { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
+  .filtros select { font: inherit; font-size: 12px; background: #0d1938; color: var(--texto); border: 1px solid var(--linha-forte); border-radius: 6px; padding: 4px 8px; }
+  .filtros .nota-f { font-size: 11px; color: var(--fraco); }
+  .ind-grade { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+  .ind-grade .largo { grid-column: 1 / -1; }
+  .ind-kpis { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; margin-bottom: 12px; }
+  .graf-sub { font-size: 11px; color: var(--fraco); padding: 0 13px; margin-top: 8px; }
+  .colunas { display: flex; align-items: flex-end; gap: 2px; height: 170px; padding: 8px 4px 0; border-bottom: 1px solid var(--linha); position: relative; }
+  .colunas .col { flex: 1; display: flex; flex-direction: column-reverse; gap: 2px; height: 100%; justify-content: flex-start; cursor: default; min-width: 3px; }
+  .colunas .col:hover { background: #ffffff08; }
+  .colunas .seg { width: 100%; background: var(--cor); }
+  .colunas .col .seg:last-child { border-radius: 4px 4px 0 0; }
+  .eixo-x { display: flex; gap: 2px; padding: 3px 4px 0; }
+  .eixo-x span { flex: 1; font-family: var(--mono); font-size: 9px; color: var(--fraco); text-align: center; overflow: hidden; white-space: nowrap; }
+  .hbarras { display: flex; flex-direction: column; gap: 6px; }
+  .hb { display: grid; grid-template-columns: minmax(90px, 38%) 1fr 54px; gap: 8px; align-items: center; cursor: default; }
+  .hb .r { font-size: 11.5px; color: var(--texto); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .hb .trilho { display: flex; gap: 2px; height: 10px; }
+  .hb .trilho .seg { height: 100%; background: var(--cor); }
+  .hb .trilho .seg:last-child { border-radius: 0 4px 4px 0; }
+  .hb .v { font-family: var(--mono); font-size: 11px; color: var(--texto); text-align: right; }
+  .hb:hover .r { color: #fff; }
+  .legenda-g { display: flex; gap: 14px; flex-wrap: wrap; font-size: 11px; color: var(--fraco); margin-bottom: 8px; }
+  .legenda-g i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
+  #dica { position: fixed; z-index: 60; pointer-events: none; background: #0b1428; border: 1px solid var(--linha-forte); border-radius: 6px;
+          padding: 6px 9px; font-size: 11.5px; color: var(--texto); box-shadow: 0 6px 18px #0008; display: none; max-width: 300px; white-space: pre-line; }
+  @media (max-width: 1000px) {
+    .ind-grade, .ind-kpis { grid-template-columns: 1fr 1fr; } .ind-grade > * { grid-column: 1 / -1; }
+    .tl-eixo { margin-left: 110px; } .tl-linha { grid-template-columns: 102px 1fr; }
+  }
+  /* detalhe da ocorrência */
+  .oc { cursor: pointer; } .oc:hover { background: #0c1730; }
+  .gaveta-fundo { position: fixed; inset: 0; background: #000a; z-index: 50; display: none; }
+  .gaveta-fundo.aberta { display: block; }
+  .gaveta { position: fixed; top: 0; right: 0; bottom: 0; width: min(620px, 100vw); background: #060c1c; border-left: 1px solid var(--linha-forte);
+            z-index: 51; display: flex; flex-direction: column; transform: translateX(105%); transition: transform .2s ease; box-shadow: -20px 0 40px #0008; }
+  .gaveta.aberta { transform: none; }
+  .gaveta header.g { display: block; position: static; padding: 14px 16px 10px; border-bottom: 1px solid var(--linha); background: #081128; }
+  .gaveta .fechar { position: absolute; top: 10px; right: 12px; font-size: 16px; padding: 2px 10px; }
+  .gaveta h3 { margin: 0 40px 4px 0; font-size: 17px; color: var(--titulo); }
+  .gaveta .meta-g { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; font-size: 12px; color: var(--fraco); }
+  .gaveta .botoes { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+  .gaveta .botoes button { font-size: 11px; padding: 5px 10px; }
+  .gaveta .corpo-g { overflow: auto; padding: 12px 16px 24px; flex: 1; }
+  .gaveta .secao { font-size: 10px; letter-spacing: 1.4px; color: var(--rotulo); font-weight: 700; margin: 14px 0 6px; }
+  .msg-g { border-left: 2px solid #1c2c5c; padding: 4px 0 6px 10px; margin-bottom: 2px; }
+  .msg-g .cab { font-size: 11px; color: var(--fraco); display: flex; gap: 8px; }
+  .msg-g .cab b { color: #c7d2fe; }
+  .msg-g .t { font-size: 13px; color: #d5dcec; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .msg-g.eu { border-left-color: #2b4a99; } .msg-g.eu .cab b { color: var(--azul); }
+  .msg-g.aviso { border-left: 3px solid var(--vermelho); background: #1d0810; border-radius: 0 6px 6px 0; }
+  .msg-g.normalizacao { border-left: 3px solid var(--verde); background: #08200f; border-radius: 0 6px 6px 0; }
+  .msg-g .grupo-g { color: var(--roxo); }
+  .msg-g.outra { opacity: .38; } .msg-g.outra:hover { opacity: 1; }
+  .nova-versao { margin: 10px 18px 0; padding: 9px 12px; border-radius: 8px; background: #0b2a1d; color: #bbf7d0; border: 1px solid #1e7a4c;
+                 font-size: 12px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .nova-versao button { margin-left: auto; color: var(--verde); border-color: #1e7a4c; background: #0f3a27; font-weight: 700; letter-spacing: 1px; }
+  @keyframes pulso { 0%, 100% { transform: scale(.6); opacity: 1; } 50% { transform: scale(1); opacity: .35; } }
+  @keyframes pisca { 50% { opacity: .25; } }
+  @keyframes brilho { 0%, 100% { box-shadow: 0 0 0 0 #ff4d5e00; } 50% { box-shadow: 0 0 18px 2px #ff4d5e40; } }
+  @keyframes alarmeKpi { 50% { background: #2a0710; } }
+
+  @media (max-width: 1500px) { main { grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); } .col3 { grid-column: 1 / -1; display: grid; grid-template-columns: 1fr 1fr; } }
+  @media (max-width: 1000px) {
+    header { grid-template-columns: 1fr auto; } .plantao { grid-column: 1 / -1; justify-self: stretch; order: 5; }
+    .kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); } main, .aovivo, .col3 { grid-template-columns: 1fr; display: grid; }
+    .alto, .medio { max-height: none; } .feed .l { grid-template-columns: 40px 1fr; } .feed .l .g { display: none; }
+  }
+  @media (max-width: 600px) {
+    header { grid-template-columns: 1fr; padding: 10px 12px; } .relogio { text-align: left; } .relogio .hora { font-size: 24px; }
+    .estado { align-items: flex-start; } .chips { flex-wrap: wrap; } .marca h1 { font-size: 15px; letter-spacing: 2px; }
+    .plantao { flex-wrap: wrap; } .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 10px 12px 0; }
+    main { padding: 10px 12px; } .aovivo { margin: 0 12px 12px; } .painel > h2 { flex-wrap: wrap; }
+    .kpi .v { font-size: 24px; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="marca"><div class="radar"></div><div><h1>CENTRO DE OPERAÇÕES</h1><small id="subtitulo">WHATSAPP AO VIVO</small></div></div>
+  <div class="plantao inativo" id="plantao"><b>SEM PLANTÃO</b></div>
+  <div class="relogio"><div class="hora" id="hora">--:--:--</div><div class="data" id="data"></div></div>
+  <div class="estado">
+    <div class="chips">
+      <span class="chip"><span class="led" id="led-wa"></span><span id="t-wa">WHATSAPP</span></span>
+      <span class="chip"><span class="led" id="led-sync"></span><span id="t-sync">SINCRONIA</span></span>
+    </div>
+    <div class="chips">
+      <button id="btn-som" title="Toca um alarme e mostra notificação quando surgir ocorrência crítica ou alguém te marcar">🔇 Alertas desligados</button>
+      <button id="btn-sync" title="Busca mensagens novas agora">⟳ Sincronizar</button>
+      <button id="btn-teste" title="Dispara um alarme de teste no celular (em até 1 min) e aqui">🔔 Testar alarme</button>
+      <button id="btn-celular" class="so-pc" title="Mostra o QR para conectar o app Android a este PC">📱 Conectar celular</button>
+      <button id="btn-tela" title="Tela cheia (F)">⛶</button>
+      <span class="vistas"><button class="sel" data-vista="painel">PAINEL</button><button data-vista="mapa">MAPA</button><button data-vista="indicadores">INDICADORES</button></span>
+    </div>
+  </div>
+</header>
+<div class="gaveta-fundo" id="gaveta-fundo"></div>
+<aside class="gaveta" id="gaveta" aria-hidden="true">
+  <header class="g"><button class="fechar" id="gaveta-fechar" title="Fechar (Esc)">✕</button><div id="gaveta-topo"></div></header>
+  <div class="corpo-g" id="gaveta-corpo"></div>
+</aside>
+<div id="aviso-app"></div>
+<div id="aviso-pc"></div>
+<div class="gaveta-fundo" id="modal-fundo"></div>
+<div class="modal" id="modal-celular" hidden>
+  <button class="fechar" data-fechar-modal>✕</button>
+  <h3>📱 CONECTAR CELULAR</h3>
+  <div class="modal-corpo">
+    <div id="qr-celular" class="qr"></div>
+    <ol>
+      <li>No celular (Android), instale e entre no <b>Tailscale</b> com a mesma conta deste PC.</li>
+      <li>Abra a <b>câmera</b> e aponte para o QR ao lado. Toque no link que aparecer.</li>
+      <li>Se ainda não tem o app, toque em <b>BAIXAR O APP</b>, instale e escaneie de novo.</li>
+      <li>Toque em <b>CONECTAR ESTE CELULAR</b>. Pronto: os alarmes passam a chegar nele.</li>
+    </ol>
+    <p class="nota-modal" id="nota-celular"></p>
+  </div>
+</div>
+<div id="avisos"></div>
+
+<div class="kpis">
+  <div class="kpi" id="k-crit" style="--cor:var(--vermelho)"><div class="r">CRÍTICAS ABERTAS</div><div class="v" id="v-crit">–</div><div class="s">desarme, trip, emergencial</div></div>
+  <div class="kpi" style="--cor:var(--amarelo)"><div class="r">ALERTAS ABERTOS</div><div class="v" id="v-alerta">–</div><div class="s">falha, comunicação, alarme</div></div>
+  <div class="kpi" style="--cor:var(--laranja)"><div class="r">USINAS AFETADAS</div><div class="v" id="v-usinas">–</div><div class="s" id="s-usinas">de – monitoradas</div></div>
+  <div class="kpi" style="--cor:var(--verde)"><div class="r">NORMALIZADAS 24H</div><div class="v" id="v-norm">–</div><div class="s" id="s-norm">ocorrências fechadas</div></div>
+  <div class="kpi" style="--cor:var(--azul)"><div class="r">AGUARDANDO VOCÊ</div><div class="v" id="v-ag">–</div><div class="s" id="s-ag">conversas</div></div>
+  <div class="kpi" style="--cor:var(--roxo)"><div class="r">CHAMADOS ABERTOS</div><div class="v" id="v-ch">–</div><div class="s" id="s-ch">últimos 7 dias</div></div>
+</div>
+
+<section id="vista-mapa" hidden>
+  <div id="mapa"></div>
+  <section class="painel"><h2>NO MAPA · OCORRÊNCIAS ABERTAS <span class="qtd" id="q-mapa">0</span></h2>
+    <div class="corpo alto mapa-lista" id="mapa-lista"></div></section>
+</section>
+<section id="vista-indicadores" hidden>
+  <div class="filtros">
+    <span class="vistas"><button data-dias="1">24 H</button><button class="sel" data-dias="7">7 DIAS</button><button data-dias="30">30 DIAS</button></span>
+    <select id="filtro-cliente"><option value="">Todos os clientes</option></select>
+    <span class="nota-f" id="nota-ind"></span>
+  </div>
+  <div class="ind-kpis">
+    <div class="kpi" style="--cor:var(--azul)"><div class="r">OCORRÊNCIAS</div><div class="v" id="i-total">–</div><div class="s" id="i-usinas">–</div></div>
+    <div class="kpi" style="--cor:var(--vermelho)"><div class="r">CRÍTICAS</div><div class="v" id="i-crit">–</div><div class="s">desarme, trip, emergencial</div></div>
+    <div class="kpi" style="--cor:var(--verde)"><div class="r">TEMPO ATÉ NORMALIZAR</div><div class="v" id="i-mttr">–</div><div class="s" id="i-mttr-s">mediana</div></div>
+    <div class="kpi" style="--cor:var(--amarelo)"><div class="r">AINDA ABERTAS</div><div class="v" id="i-abertas">–</div><div class="s">no período</div></div>
+    <div class="kpi" style="--cor:var(--roxo)"><div class="r">CHAMADOS NO DIÁRIO</div><div class="v" id="i-chamados">–</div><div class="s" id="i-chamados-s">no período</div></div>
+  </div>
+  <div class="ind-grade">
+    <section class="painel largo"><h2 id="t-serie">OCORRÊNCIAS POR DIA</h2>
+      <div class="corpo"><div class="legenda-g"><span><i style="background:var(--vermelho)"></i>Críticas</span><span><i style="background:var(--amarelo)"></i>Alertas</span></div>
+        <div class="colunas" id="g-serie"></div><div class="eixo-x" id="g-serie-x"></div></div></section>
+    <section class="painel"><h2>USINAS COM MAIS OCORRÊNCIAS</h2>
+      <div class="corpo"><div class="legenda-g"><span><i style="background:var(--vermelho)"></i>Críticas</span><span><i style="background:var(--amarelo)"></i>Alertas</span></div><div class="hbarras" id="g-reinc"></div></div></section>
+    <section class="painel"><h2>TEMPO ATÉ NORMALIZAR · POR USINA</h2>
+      <div class="graf-sub">Mediana, em horas, das ocorrências com normalização confirmada (COG, mensagem ou você). As mais demoradas primeiro.</div>
+      <div class="corpo"><div class="hbarras" id="g-mttr"></div></div></section>
+    <section class="painel"><h2>TIPOS DE FALHA</h2><div class="corpo"><div class="hbarras" id="g-tipos"></div></div></section>
+    <section class="painel"><h2>OCORRÊNCIAS POR CLIENTE</h2>
+      <div class="graf-sub">Cliente pela pasta do KMZ; "sem cliente" = usina ainda sem código ligado.</div>
+      <div class="corpo"><div class="hbarras" id="g-clientes"></div></div></section>
+    <section class="painel largo"><h2>CHAMADOS DO DIÁRIO POR MÊS</h2>
+      <div class="corpo"><div class="legenda-g"><span><i style="background:var(--verde)"></i>Resolvido</span><span><i style="background:var(--amarelo)"></i>Em andamento</span><span><i style="background:var(--vermelho)"></i>Pendente</span></div>
+        <div class="colunas" id="g-meses" style="height:150px"></div><div class="eixo-x" id="g-meses-x"></div></div></section>
+    <section class="painel"><h2>CHAMADOS POR USINA · NO PERÍODO</h2>
+      <div class="corpo"><div class="legenda-g"><span><i style="background:var(--vermelho)"></i>Abertos</span><span><i style="background:#3987e5"></i>Resolvidos</span></div><div class="hbarras" id="g-ch-usina"></div></div></section>
+    <section class="painel"><h2>TAREFAS POR TÉCNICO · NO PERÍODO</h2>
+      <div class="corpo"><div class="legenda-g"><span><i style="background:var(--amarelo)"></i>Abertas</span><span><i style="background:var(--verde)"></i>Concluídas</span></div><div class="hbarras" id="g-tarefas"></div></div></section>
+  </div>
+</section>
+<div id="dica"></div>
+<main id="vista-painel">
+  <section class="painel tl-painel" id="painel-tl">
+    <h2><span id="t-tl">LINHA DO TEMPO · 24 H</span> <span class="qtd" id="q-tl">0</span>
+      <span class="legenda-st"><span><i style="background:var(--vermelho)"></i>CRÍTICA</span><span><i style="background:var(--amarelo)"></i>ALERTA</span><span><i style="background:var(--verde)"></i>NORMALIZADA</span><span><i style="background:#64748b"></i>INATIVIDADE</span></span></h2>
+    <div class="tl"><div class="tl-eixo" id="tl-eixo"></div><div class="tl-linhas" id="tl-linhas"></div></div>
+  </section>
+  <section class="painel">
+    <h2>OCORRÊNCIAS · 24H <span class="qtd" id="q-oc">0</span>
+      <span class="dir"><button class="aba sel" data-filtro="abertas">ABERTAS</button><button class="aba" data-filtro="normalizadas">NORMALIZADAS</button><button class="aba" data-filtro="todas">TODAS</button></span></h2>
+    <div class="corpo alto" id="ocorrencias"></div>
+  </section>
+
+  <div class="coluna">
+    <section class="painel">
+      <h2>QUADRO DE USINAS <span class="qtd" id="q-usi">0</span></h2>
+      <div class="corpo medio"><div class="quadro" id="quadro"></div>
+        <div class="legenda"><span><i style="background:var(--vermelho)"></i>crítica</span><span><i style="background:var(--amarelo)"></i>alerta</span>
+          <span><i style="background:var(--verde)"></i>normalizada</span><span><i style="background:#2b7a5a"></i>sem ocorrência</span><span><i style="background:var(--cinza)"></i>sem mensagens 24h</span></div></div>
+    </section>
+    <section class="painel">
+      <h2>MENSAGENS POR HORA · 24H <span class="qtd" id="q-msgs">0</span></h2>
+      <div class="corpo"><div class="grafico" id="grafico"></div><div class="eixo" id="eixo"></div></div>
+    </section>
+  </div>
+
+  <div class="coluna col3">
+    <section class="painel">
+      <h2>AGUARDANDO SUA RESPOSTA <span class="qtd" id="q-ag">0</span></h2>
+      <div class="corpo medio">
+        <div id="aguardando"></div>
+        <details><summary id="s-fecho">Provavelmente encerradas</summary><div id="fechamento"></div></details>
+        <details id="det-adiados"><summary id="s-adiados">Lembrar depois</summary><div id="adiados"></div></details>
+      </div>
+    </section>
+    <section class="painel">
+      <h2><span id="t-lista">CHAMADOS · 7 DIAS</span> <span class="qtd" id="q-lista">0</span>
+        <span class="dir"><button class="aba sel" data-lista="chamados">CHAMADOS</button><button class="aba" data-lista="tarefas">TAREFAS</button><button class="aba" data-lista="resolvidos">RESOLVIDOS</button></span></h2>
+      <div class="corpo medio" id="lista"></div>
+    </section>
+  </div>
+</main>
+
+<div class="aovivo" id="vista-aovivo">
+  <section class="painel"><h2>AO VIVO · ÚLTIMAS MENSAGENS DOS GRUPOS <span class="led ok" style="margin-left:4px"></span></h2><div class="corpo medio feed" id="feed"></div></section>
+  <section class="painel"><h2>BOLETIM DO COG <span class="dir" id="abas-boletim"></span></h2><div class="corpo medio"><div class="boletim" id="boletim"></div></div></section>
+</div>
+
+<script src="vendor/leaflet/leaflet.js"></script>
+<script src="config.js"></script>
+<script src="vendor/qrcode/qrcode.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+let dados = null, filtroOc = "abertas", lista = "chamados", boletimSel = 0;
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const agora = () => Date.now() / 1000;
+const hm = ts => new Date(ts * 1000).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+const dhm = ts => new Date(ts * 1000).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+function dur(seg) {
+  seg = Math.max(0, seg);
+  if (seg < 3600) return Math.floor(seg / 60) + "m";
+  if (seg < 86400) return Math.floor(seg / 3600) + "h" + String(Math.floor(seg % 3600 / 60)).padStart(2, "0");
+  return Math.floor(seg / 86400) + "d" + Math.floor(seg % 86400 / 3600) + "h";
+}
+// por que a ocorrência foi fechada
+const MOTIVOS = { cog: "NORMALIZADA · COG", mensagem: "NORMALIZADA · MENSAGEM", inatividade: "BAIXA POR INATIVIDADE", manual: "ENCERRADA NO PAINEL", sem_registro: "SEM REGISTRO DE NORMALIZAÇÃO" };
+const motivoBaixa = o => MOTIVOS[(o.normalizado || {}).motivo] || "NORMALIZADA";
+const fmtData = d => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(d || ""); return m ? `${m[3]}/${m[2]}` : (d || ""); };
+const ler = (k, padrao) => { try { return JSON.parse(localStorage.getItem(k)) ?? padrao; } catch { return padrao; } };
+const gravar = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
+
+/* ---------- relógio e plantão ---------- */
+function relogio() {
+  const d = new Date();
+  $("hora").textContent = d.toLocaleTimeString("pt-BR");
+  $("data").textContent = d.toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "long" });
+  const p = dados && dados.plantao;
+  const el = $("plantao");
+  if (!p) { el.className = "plantao inativo"; el.innerHTML = `<b style="color:var(--fraco)">—</b>`; return; }
+  const ultimo = (p.historico || [])[0];
+  const linkUltimo = ultimo ? `<a href="${urlRelatorio(ultimo.inicio_ts, ultimo.fim_ts)}" target="_blank" title="${esc(ultimo.relatorio || "")}">último relatório</a>` : "";
+  let html;
+  if (p.ativo) {
+    el.className = "plantao";
+    html = `<b>● PLANTÃO ATIVO</b><span>${esc(p.titulo || "Plantão")}${p.equipe && p.equipe.length ? " · " + esc(p.equipe.join(", ")) : ""}</span>
+      <span>há <span class="resta">${dur(agora() - p.inicio_ts)}</span></span>
+      <button class="relatorio" data-relatorio="${p.inicio_ts}" title="Abre o relatório do plantão até agora, sem finalizar">📄 RELATÓRIO ATÉ AGORA</button>
+      <button class="finalizar" data-plantao="finalizar">FINALIZAR PLANTÃO</button>`;
+  } else {
+    el.className = "plantao inativo";
+    html = `<b style="color:var(--rotulo)">MONITORANDO</b><span style="color:var(--fraco)">sem plantão ativo</span>
+      <button class="iniciar" data-plantao="iniciar">INICIAR PLANTÃO</button>${linkUltimo}`;
+  }
+  if (el.dataset.html !== html) { el.innerHTML = html; el.dataset.html = html; }  // não recria os botões a cada segundo
+}
+setInterval(relogio, 1000);
+
+/* ---------- alertas sonoros ---------- */
+let somLigado = ler("som", false), ctx = null;
+function atualizaBotaoSom() {
+  const s = (typeof dados !== "undefined" && dados && dados.silencio) || { inicio: 20, fim: 7 };
+  $("btn-som").textContent = !somLigado ? "🔇 Alertas desligados" : emSilencio() ? `🌙 Silêncio até ${s.fim}h` : "🔔 Alertas ligados";
+  $("btn-som").title = `Das ${s.inicio}h às ${s.fim}h nada toca (painel e celular); as notificações chegam em silêncio.`;
+  $("btn-som").classList.toggle("ativo", somLigado);
+}
+setInterval(atualizaBotaoSom, 60000);
+// horário de silêncio (vem do PC; padrão 20h às 7h): nada toca, a notificação aparece muda
+function emSilencio() {
+  const s = (dados && dados.silencio) || { inicio: 20, fim: 7 }, h = new Date().getHours();
+  if (s.inicio === s.fim) return false;
+  return s.inicio < s.fim ? h >= s.inicio && h < s.fim : h >= s.inicio || h < s.fim;
+}
+function bip(critico) {
+  if (!somLigado || emSilencio()) return;
+  try {
+    ctx = ctx || new (window.AudioContext || window.webkitAudioContext)();
+    const notas = critico ? [880, 660, 880, 660, 880] : [740, 990];
+    notas.forEach((f, i) => {
+      const o = ctx.createOscillator(), g = ctx.createGain();
+      o.type = critico ? "square" : "sine"; o.frequency.value = f;
+      const t = ctx.currentTime + i * 0.22;
+      g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.18, t + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.2);
+      o.connect(g).connect(ctx.destination); o.start(t); o.stop(t + 0.21);
+    });
+  } catch {}
+}
+function notificar(titulo, corpo, critico) {
+  bip(critico);
+  if (somLigado && "Notification" in window && Notification.permission === "granted") {
+    try { new Notification((emSilencio() ? "🔕 " : "") + titulo, { body: corpo, tag: titulo + corpo, requireInteraction: critico, silent: emSilencio() }); } catch {}
+  }
+}
+$("btn-som").addEventListener("click", async () => {
+  somLigado = !somLigado; gravar("som", somLigado); atualizaBotaoSom();
+  if (somLigado) {
+    if ("Notification" in window && Notification.permission === "default") { try { await Notification.requestPermission(); } catch {} }
+    bip(false);
+  }
+});
+atualizaBotaoSom();
+
+// o que já foi visto, para alertar só o que é novo
+let vistos = new Set(ler("vistos", [])), primeira = !localStorage.getItem("vistos");
+function verificarNovos(d) {
+  const novos = [];
+  for (const o of d.ocorrencias || []) {
+    const k = "oc:" + o.chave + ":" + o.sev;
+    if (!o.normalizado && !vistos.has(k)) novos.push(["oc", o, k]);
+  }
+  for (const p of d.aguardando || []) {
+    const k = "ag:" + p.chave + ":" + p.desde_ts;
+    if (!p.fechamento && !vistos.has(k)) novos.push(["ag", p, k]);
+  }
+  if (!primeira) {
+    const crit = novos.filter(([t, o]) => t === "oc" && o.sev === "critico");
+    const marc = novos.filter(([t, p]) => t === "ag" && p.motivo === "marcou você");
+    if (crit.length) { notificar(`🚨 ${crit[0][1].usina}`, crit[0][1].msg.texto.slice(0, 160), true); ultimoReforco = Date.now(); }
+    else if (marc.length) notificar(`📣 ${marc[0][1].nome} te marcou`, (marc[0][1].previa[0] || {}).texto || "", false);
+    else if (novos.some(([t, o]) => t === "oc")) bip(false);
+  }
+  novos.forEach(([, , k]) => vistos.add(k));
+  primeira = false;
+  gravar("vistos", [...vistos].slice(-2000));
+  return new Set(novos.map(([, , k]) => k));
+}
+let recemChegados = new Set();
+
+// escalonamento: crítica aberta sem "ciente" volta a tocar a cada REPETIR minutos
+const REPETIR = 5;
+let ultimoReforco = 0;
+function reforcar() {
+  if (!dados || !dados.pronto || !somLigado) return;
+  const pendentes = (dados.ocorrencias || []).filter(o => !o.normalizado && o.sev === "critico" && !o.ciente);
+  if (!pendentes.length || Date.now() - ultimoReforco < REPETIR * 60000) return;
+  ultimoReforco = Date.now();
+  const o = pendentes[0];
+  notificar(`🚨 ${pendentes.length} crítica(s) sem ciente`, `${o.usina}: aberta há ${dur(agora() - o.inicio_ts)}`, true);
+}
+setInterval(reforcar, 30000);
+
+/* ---------- desenho ---------- */
+function desenhar() {
+  const d = dados; if (!d) return;
+  relogio();
+  const avisos = [];
+  if (d.erro) avisos.push(d.erro);
+  if (d.offline) avisos.push(`PC offline ou fora do Tailscale: mostrando os dados de ${new Date(d.cache_quando).toLocaleString("pt-BR")}. Atualiza sozinho quando ele voltar.`);
+  if (!d.pronto) { $("ocorrencias").innerHTML = `<div class="vazio">Primeira sincronização com o wa-app (uns 30 s)…</div>`; $("avisos").innerHTML = avisos.map(a => `<div class="aviso">${esc(a)}</div>`).join(""); return; }
+  const w = d.whatsapp || {}, ok = w.conexao === "open";
+  $("led-wa").className = "led " + (ok ? "ok" : "ruim");
+  $("t-wa").textContent = ok ? "WHATSAPP ONLINE" : "WHATSAPP " + (w.conexao || "SEM RESPOSTA").toUpperCase();
+  const atraso = agora() - d.quando;
+  $("led-sync").className = "led " + (atraso < 180 ? "ok" : "ruim");
+  $("t-sync").textContent = d.sincronizando ? "SINCRONIZANDO…" : `SINCRONIZADO ${hm(d.quando)}`;
+  if (!ok) avisos.push("O wa-app não está conectado ao WhatsApp: o painel pode estar desatualizado.");
+  if (atraso > 300) avisos.push(`Última sincronização há ${dur(atraso)}: verifique o serviço do painel.`);
+  if (w.lacunas) avisos.push(`O wa-app aponta ${w.lacunas} lacuna(s) no recebimento: pode haver mensagens faltando.`);
+  (d.erros || []).forEach(e => avisos.push(e));
+  $("avisos").innerHTML = avisos.map(a => `<div class="aviso">${esc(a)}</div>`).join("");
+
+  // indicadores
+  const abertas = d.ocorrencias.filter(o => !o.normalizado), normalizadas = d.ocorrencias.filter(o => o.normalizado);
+  const crit = abertas.filter(o => o.sev === "critico").length;
+  $("v-crit").textContent = crit; $("k-crit").classList.toggle("alarme", abertas.some(o => o.sev === "critico" && !o.ciente));
+  $("v-alerta").textContent = abertas.length - crit;
+  const afetadas = d.usinas.filter(u => u.estado === "critico" || u.estado === "alerta").length;
+  $("v-usinas").textContent = afetadas; $("s-usinas").textContent = `de ${d.usinas.length} no quadro`;
+  $("v-norm").textContent = normalizadas.length;
+  const porInatividade = normalizadas.filter(o => (o.normalizado || {}).motivo === "inatividade").length;
+  $("s-norm").textContent = porInatividade ? `${porInatividade} por inatividade` : "ocorrências fechadas";
+  const reais = d.aguardando.filter(p => !p.fechamento);
+  $("v-ag").textContent = reais.length;
+  const maisAntiga = reais.length ? Math.min(...reais.map(p => p.desde_ts)) : null;
+  $("s-ag").textContent = maisAntiga ? `mais antiga há ${dur(agora() - maisAntiga)}` : "nenhuma pendente";
+  const corte = new Date(Date.now() - 7 * 86400000).toLocaleDateString("sv-SE");
+  const chamados7 = d.chamados.filter(c => (c.data || "") >= corte);
+  $("v-ch").textContent = chamados7.length; $("s-ch").textContent = `${d.chamados.length} no total · ${d.tarefas.length} tarefas`;
+  document.title = (crit ? `🚨${crit} ` : "") + (reais.length ? `(${reais.length}) ` : "") + "Centro de Operações";
+
+  // ocorrências
+  const listaOc = filtroOc === "abertas" ? abertas : filtroOc === "normalizadas" ? normalizadas : d.ocorrencias;
+  $("q-oc").textContent = abertas.length;
+  $("ocorrencias").innerHTML = listaOc.map(o => {
+    const classe = o.normalizado ? (o.normalizado.motivo === "inatividade" ? "normalizado inatividade" : "normalizado") : o.sev;
+    const nova = recemChegados.has("oc:" + o.chave + ":" + o.sev) || (!o.normalizado && !o.ciente && agora() - o.ultima_ts < 1800);
+    const tempo = o.normalizado ? `durou ${dur(o.normalizado.ts - o.inicio_ts)}` : dur(agora() - o.inicio_ts);
+    return `<div class="oc ${classe} ${nova && !o.normalizado ? "nova" : ""}" data-chave="${esc(o.chave)}">
+      <div class="barra"></div>
+      <div style="min-width:0">
+        <div class="topo"><span class="usina">${esc(o.usina)}</span><span class="sev">${o.normalizado ? motivoBaixa(o) : o.sev === "critico" ? "CRÍTICA" : "ALERTA"}</span>
+          ${o.qtd > 1 ? `<span class="tag">${o.qtd} AVISOS</span>` : ""}${o.ciente ? `<span class="tag">CIENTE</span>` : ""}</div>
+        <div class="texto">${esc(o.msg.texto)}</div>
+        <div class="quem">${esc(o.msg.de)} · ${esc(o.grupos.join(" · "))}</div>
+        ${o.normalizado ? `<div class="norm">✔ ${hm(o.normalizado.ts)} ${esc(o.normalizado.de)}: ${esc(o.normalizado.texto.slice(0, 140))}</div>` : ""}
+      </div>
+      <div class="lado"><span class="tempo">${tempo}</span><span class="hora">${dhm(o.inicio_ts)}</span>
+        <span style="display:flex;gap:4px">${!o.normalizado && !o.ciente ? `<button data-oc="ciente" title="Para o alarme; a ocorrência continua aberta">CIENTE</button>` : ""}
+        ${!o.normalizado ? `<button data-oc="encerrar" title="Fecha a ocorrência (resolvida sem aviso no grupo)">ENCERRAR</button>` : ""}
+        ${o.normalizado ? `<button data-oc="reabrir" title="A baixa foi errada: volta a ficar aberta">REABRIR</button>` : ""}</span></div></div>`;
+  }).join("") || `<div class="vazio">${filtroOc === "abertas" ? "Nenhuma ocorrência aberta nas últimas 24 h. ✅" : "Nada aqui."}</div>`;
+
+  // quadro de usinas
+  $("q-usi").textContent = d.usinas.length;
+  $("quadro").innerHTML = d.usinas.map(u => {
+    const dica = `${u.grupo}\n${u.ultima ? "última: " + dhm(u.ultima_ts) + " " + u.ultima.de + ": " + u.ultima.texto : ""}`;
+    const meta = u.abertas ? `${u.abertas} aberta${u.abertas > 1 ? "s" : ""}` : u.msgs_24h != null ? `${u.msgs_24h} msgs` : "via COG";
+    return `<div class="usi ${u.estado}" title="${esc(dica)}"><div class="n">${esc(u.nome.replace(/^UFVs?\s+/i, ""))}</div>
+      <div class="m">${meta}${u.ultima_ts ? " · " + dur(agora() - u.ultima_ts) : ""}</div></div>`;
+  }).join("");
+
+  // gráfico de atividade
+  const at = d.atividade || [], max = Math.max(5, ...at.map(a => a.n));
+  $("q-msgs").textContent = at.reduce((s, a) => s + a.n, 0);
+  $("grafico").innerHTML = at.map((a, i) => `<div class="${i === at.length - 1 ? "agora" : ""}" style="height:${Math.max(3, a.n / max * 100)}%" title="${hm(a.h)}: ${a.n} mensagens"></div>`).join("");
+  $("eixo").innerHTML = at.filter((_, i) => i % 4 === 0).map(a => `<span>${hm(a.h).slice(0, 2)}h</span>`).join("");
+
+  // aguardando
+  const fechos = d.aguardando.filter(p => p.fechamento);
+  $("q-ag").textContent = reais.length;
+  $("aguardando").innerHTML = reais.map(p => cartaoConversa(p, "aguardando")).join("") || `<div class="vazio">Nenhuma conversa esperando você. 👌</div>`;
+  $("fechamento").innerHTML = fechos.map(p => cartaoConversa(p, "aguardando")).join("") || `<div class="vazio">Nenhuma.</div>`;
+  $("s-fecho").textContent = `Provavelmente encerradas ("ok", emoji…) · ${fechos.length}`;
+  $("adiados").innerHTML = d.adiados.map(p => cartaoConversa(p, "adiados")).join("");
+  $("s-adiados").textContent = `Lembrar depois · ${d.adiados.length}`;
+  $("det-adiados").style.display = d.adiados.length ? "" : "none";
+
+  desenharLista(chamados7);
+  desenharLinhaDoTempo();
+  aplicarPerfil();
+
+  // ao vivo
+  $("feed").innerHTML = (d.feed || []).slice(0, 40).map(m =>
+    `<div class="l"><span class="h">${hm(m.ts)}</span><span class="g" title="${esc(m.grupo)}">${esc(m.grupo)}</span><span class="t"><b>${esc(m.de)}:</b> ${esc(m.texto)}</span></div>`).join("")
+    || `<div class="vazio">Sem mensagens recentes.</div>`;
+
+  // boletins
+  const bs = d.boletins || [];
+  boletimSel = Math.min(boletimSel, Math.max(0, bs.length - 1));
+  $("abas-boletim").innerHTML = bs.map((b, i) => `<button class="aba ${i === boletimSel ? "sel" : ""}" data-boletim="${i}" title="${esc(b.grupo)}">${hm(b.ts)}</button>`).join("");
+  $("boletim").textContent = bs.length ? `${bs[boletimSel].grupo} · ${dhm(bs[boletimSel].ts)}\n\n${bs[boletimSel].completo}` : "Nenhum boletim nas últimas 24 h.";
+}
+
+let verAntigos = false;
+const classeSt = s => { s = (s || "").toLowerCase(); return s.includes("pendente") || s.includes("atrasad") ? "pendente" : s.includes("andamento") || s.includes("aguard") ? "andamento" : "ok"; };
+// botões de status de um chamado/tarefa: gravam na planilha do Diário (pelo ID da linha)
+function botoesDiario(tipo, item) {
+  if (!item.id) return `<div class="x" style="opacity:.7">digitado à mão no Diário (sem ID): altere pela planilha</div>`;
+  const opcoes = tipo === "chamado"
+    ? [["Resolvido", "✔ RESOLVIDO"], ["Em andamento", "EM ANDAMENTO"], ["Pendente", "PENDENTE"]]
+    : [["Concluída", "✔ CONCLUÍDA"], ["Em andamento", "EM ANDAMENTO"], ["Pendente", "PENDENTE"], ["Cancelada", "CANCELAR"]];
+  return `<div class="acoes" data-diario="${tipo}" data-id="${esc(item.id)}">` +
+    opcoes.filter(([s]) => s !== item.status).map(([s, r]) => `<button data-status="${esc(s)}">${r}</button>`).join("") +
+    `<button data-status="">📝 NOTA</button></div>`;
+}
+function cartaoChamadoDiario(c, comBotoes = true) {
+  return `<div class="ch"><div class="topo"><span class="u">${esc(c.usina)}</span><span class="st ${classeSt(c.status)}">${esc(c.status).toUpperCase()}</span>
+    <span class="d">${fmtData(c.data)} ${esc(c.hora || "")}</span></div><div class="a">${esc(c.assunto)}</div>
+    ${c.descricao ? `<div class="x" style="white-space:pre-wrap">${esc(c.descricao).slice(0, 600)}</div>` : ""}
+    <div class="x">${[c.acionado_por && "acionado por " + c.acionado_por, c.tecnico, c.os && "OS " + c.os].filter(Boolean).map(esc).join(" · ")}</div>
+    ${comBotoes ? botoesDiario("chamado", c) : ""}</div>`;
+}
+function desenharLista(chamados7) {
+  const d = dados;
+  if (d.perfil && !d.perfil.diario && lista !== "resolvidos") {
+    $("t-lista").textContent = lista === "chamados" ? "CHAMADOS" : "TAREFAS"; $("q-lista").textContent = "–";
+    $("lista").innerHTML = `<div class="vazio">O Diário de Chamados não está configurado nesta instalação (é opcional: veja o INSTALAR.md).</div>`;
+    return;
+  }
+  let html = "", qtd = 0, titulo = "";
+  if (lista === "chamados") {
+    titulo = "CHAMADOS · 7 DIAS";
+    const ordem = c => classeSt(c.status) === "pendente" ? 0 : 1;
+    const porData = (a, b) => ordem(a) - ordem(b) || (b.data + (b.hora || "")).localeCompare(a.data + (a.hora || ""));
+    const l = [...chamados7].sort(porData);
+    const ids = new Set(l.map(c => c.id));
+    const antigos = d.chamados.filter(c => !ids.has(c.id)).sort((a, b) => (a.data || "").localeCompare(b.data || ""));
+    qtd = l.length;
+    html = l.map(c => cartaoChamadoDiario(c)).join("") +
+      (antigos.length ? `<div class="vazio"><button data-antigos>${verAntigos ? "▲ esconder" : "▼ mostrar"} ${antigos.length} abertos há mais de 7 dias</button>
+        <span style="margin-left:6px">(do mais velho para o mais novo; dê baixa no que já foi resolvido)</span></div>` +
+        (verAntigos ? antigos.map(c => cartaoChamadoDiario(c)).join("") : "") : "");
+  } else if (lista === "tarefas") {
+    titulo = "TAREFAS DA EQUIPE"; qtd = d.tarefas.length;
+    html = d.tarefas.map(t => `<div class="ch"><div class="topo"><span class="u">${esc(t.tecnico)}</span><span class="st ${classeSt(t.status)}">${esc(t.status).toUpperCase()}</span>
+      <span class="d">${fmtData(t.data)}${t.prazo ? " · prazo " + fmtData(t.prazo) : ""}</span></div><div class="a">${t.usina ? `<b>${esc(t.usina)}</b> — ` : ""}${esc(t.solicitacao)}</div>
+      ${t.andamento ? `<div class="x" style="white-space:pre-wrap">${esc(t.andamento).slice(0, 600)}</div>` : ""}${botoesDiario("tarefa", t)}</div>`).join("");
+  } else {
+    titulo = "RESOLVIDOS HOJE";
+    const hoje = new Date().toLocaleDateString("sv-SE");
+    const ch = (d.chamados_fechados || []).filter(c => (c.atualizado || "").startsWith(hoje));
+    const tf = (d.tarefas_fechadas || []).filter(t => (t.atualizado || "").startsWith(hoje));
+    qtd = d.resolvidos.length + ch.length + tf.length;
+    html = d.resolvidos.map(p => cartaoConversa(p, "resolvidos")).join("")
+      + ch.map(c => `<div class="ch"><div class="topo"><span class="u">${esc(c.usina)}</span><span class="st ok">${esc(c.status).toUpperCase()}</span></div><div class="a">${esc(c.assunto)}</div>
+          <div class="acoes" data-diario="chamado" data-id="${esc(c.id || "")}">${c.id ? `<button data-status="Em andamento">REABRIR</button>` : ""}</div></div>`).join("")
+      + tf.map(t => `<div class="ch"><div class="topo"><span class="u">${esc(t.tecnico)}</span><span class="st ok">${esc(t.status).toUpperCase()}</span></div><div class="a">${esc(t.solicitacao)}</div>
+          <div class="acoes" data-diario="tarefa" data-id="${esc(t.id || "")}">${t.id ? `<button data-status="Em andamento">REABRIR</button>` : ""}</div></div>`).join("");
+  }
+  $("t-lista").textContent = titulo; $("q-lista").textContent = qtd;
+  $("lista").innerHTML = html || `<div class="vazio">Nada aqui.</div>`;
+}
+
+function minutosAteAmanha() { const a = new Date(); a.setDate(a.getDate() + 1); a.setHours(8, 0, 0, 0); return Math.round((a - Date.now()) / 60000); }
+
+function cartaoConversa(p, modo) {
+  const espera = agora() - (p.desde_ts || agora());
+  const classe = modo !== "aguardando" ? "calmo" : p.fechamento ? "calmo" : espera > 4 * 3600 ? "urgente" : espera > 3600 ? "atencao" : "";
+  const previa = (p.previa || []).map(m => `<div class="${m.de === "você" ? "eu" : ""}"><b>${esc(m.de)}:</b> ${esc(m.texto)}</div>`).join("");
+  const acoes = modo === "aguardando"
+    ? `<button data-acao="respondi">✓ Respondi</button><button data-acao="resolvido">✔ Resolvido</button>
+       <span class="menu"><button data-menu>⏰ Lembrar…</button><span class="menu-opcoes">
+         <button data-acao="lembrar" data-min="30">em 30 min</button><button data-acao="lembrar" data-min="120">em 2 h</button>
+         <button data-acao="lembrar" data-min="${minutosAteAmanha()}">amanhã 8h</button></span></span>
+       <button data-acao="ignorar" title="Some até chegar mensagem nova">Ignorar</button>`
+    : `<span class="hora mono" style="font-size:10px;color:var(--fraco)">${modo === "adiados" ? "volta " + dhm(p.acao.ate) : "resolvido " + dhm(p.acao.ts)}</span> <button data-acao="desfazer">Desfazer</button>`;
+  return `<div class="ag ${classe}" data-chave="${esc(p.chave)}" data-nome="${esc(p.nome)}" data-tipo="${esc(p.tipo)}">
+    <div class="topo"><span class="nome" title="${esc(p.nome)}">${esc(p.nome)}</span>
+      ${p.tipo === "grupo" ? `<span class="tag ${p.motivo === "marcou você" ? "marcou" : "grupo"}">${p.motivo === "marcou você" ? "@VOCÊ" : "CITOU"}</span>` : ""}
+      ${modo === "aguardando" && p.desde_ts ? `<span class="espera">${dur(espera)}</span>` : ""}</div>
+    ${previa ? `<div class="previa">${previa}</div>` : ""}<div class="acoes">${acoes}</div></div>`;
+}
+
+/* ---------- dados e ações ---------- */
+// No PC a página vem do próprio servidor. No celular (app ou navegador pelo Tailscale) o endereço do PC e a
+// senha vêm do app (window.CENTRO) ou da URL (?t=senha); os últimos dados ficam guardados para quando o PC estiver desligado.
+const CFG = window.CENTRO || {};
+const BASE = (CFG.base || "").replace(/\/$/, "");
+const TOKEN = CFG.token || new URLSearchParams(location.search).get("t") || ler("token", "");
+if (TOKEN) gravar("token", TOKEN);
+const cabecalhos = () => Object.assign({ "Content-Type": "application/json" }, TOKEN ? { Authorization: "Bearer " + TOKEN } : {});
+const urlRelatorio = (inicio, fim) => `${BASE}/relatorio?inicio=${inicio}${fim ? "&fim=" + fim : ""}${TOKEN ? "&t=" + encodeURIComponent(TOKEN) : ""}`;
+
+async function carregar() {
+  try {
+    const r = await fetch(BASE + "/api/dados", { headers: cabecalhos(), cache: "no-store" });
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    dados = await r.json();
+    if (dados.pronto) {
+      recemChegados = verificarNovos(dados);
+      try { localStorage.setItem("cache_dados", JSON.stringify({ quando: Date.now(), dados })); } catch {}
+    }
+  } catch (e) {
+    let cache = null;
+    try { cache = JSON.parse(localStorage.getItem("cache_dados")); } catch {}
+    if (cache && cache.dados) {
+      dados = Object.assign({}, cache.dados, { offline: true, cache_quando: cache.quando });
+    } else {
+      dados = { pronto: false, erro: BASE ? "Não consegui falar com o PC (ele está ligado e no Tailscale?)." : "O servidor do painel não respondeu. Ele está rodando?" };
+    }
+  }
+  desenhar();
+  if (vista === "mapa") desenharMapa(false);
+}
+async function post(caminho, corpo) {
+  if (dados && dados.offline) { alert("O PC está offline: a ação fica para quando ele voltar."); return {}; }
+  const r = await fetch(BASE + caminho, { method: "POST", headers: cabecalhos(), body: JSON.stringify(corpo || {}) });
+  return r.json();
+}
+// no app Android, links e relatórios abrem no navegador do celular (o app só tem a tela do painel)
+function abrirExterno(url) { if (window.CentroApp) CentroApp.abrir(url); else window.open(url, "_blank"); }
+document.addEventListener("click", ev => {
+  const a = ev.target.closest('a[target="_blank"]');
+  if (a && window.CentroApp) { ev.preventDefault(); CentroApp.abrir(a.href); }
+}, true);
+if (window.CentroApp) document.documentElement.classList.add("no-app");
+document.addEventListener("click", async ev => {
+  const rel = ev.target.closest("[data-relatorio]");
+  if (rel) { abrirExterno(urlRelatorio(Number(rel.dataset.relatorio))); return; }
+  const pl = ev.target.closest("[data-plantao]");
+  if (pl) {
+    const p = (dados && dados.plantao) || {};
+    if (pl.dataset.plantao === "iniciar") {
+      const titulo = prompt("Iniciar plantão. Nome do plantão:", (p.padrao && p.padrao.titulo) || "Sobreaviso");
+      if (titulo === null) return;
+      const equipe = prompt("Equipe (separada por vírgula):", ((p.padrao && p.padrao.equipe) || []).join(", "));
+      if (equipe === null) return;
+      const r = await post("/api/plantao", { acao: "iniciar", titulo, equipe });
+      if (r.pronto !== undefined) { dados = r; desenhar(); }
+    } else {
+      if (!confirm("Finalizar o plantão agora? O relatório das ocorrências do período será gerado e salvo.")) return;
+      const r = await post("/api/plantao", { acao: "finalizar" });
+      if (r.finalizado) {
+        dados = r; desenhar();
+        abrirExterno(urlRelatorio(r.finalizado.inicio_ts, r.finalizado.fim_ts));
+      } else if (r.erro) alert(r.erro);
+    }
+    return;
+  }
+  if (ev.target.closest("[data-antigos]")) { verAntigos = !verAntigos; desenhar(); return; }
+  const st = ev.target.closest("[data-status]");
+  if (st && st.closest("[data-diario]")) {
+    const caixa = st.closest("[data-diario]"), status = st.dataset.status;
+    const fechando = ["Resolvido", "Concluída", "Cancelada"].includes(status);
+    const nota = prompt(status ? `Marcar como "${status}". Observação (opcional, vai para o Diário):` : "Observação para o Diário:", "");
+    if (nota === null || (!status && !nota.trim())) return;
+    caixa.querySelectorAll("button").forEach(b => b.disabled = true);
+    st.textContent = "gravando…";
+    const r = await post("/api/diario", { tipo: caixa.dataset.diario, id: caixa.dataset.id, status: status || null, nota });
+    if (r && r.pronto !== undefined) { dados = r; desenhar(); }
+    else { alert((r && r.erro) || "Não consegui gravar no Diário."); desenhar(); }
+    return;
+  }
+  const vi = ev.target.closest("[data-vista]");
+  if (vi) { mudarVista(vi.dataset.vista); return; }
+  const im = ev.target.closest("[data-ir]");
+  if (im) { irPara(im.dataset.ir); return; }
+  const menu = ev.target.closest("[data-menu]");
+  document.querySelectorAll(".menu.aberto").forEach(m => { if (!menu || m !== menu.parentElement) m.classList.remove("aberto"); });
+  if (menu) { menu.parentElement.classList.toggle("aberto"); return; }
+  const f = ev.target.closest("[data-filtro]");
+  if (f) { filtroOc = f.dataset.filtro; document.querySelectorAll("[data-filtro]").forEach(b => b.classList.toggle("sel", b === f)); desenhar(); return; }
+  const l = ev.target.closest("[data-lista]");
+  if (l) { lista = l.dataset.lista; document.querySelectorAll("[data-lista]").forEach(b => b.classList.toggle("sel", b === l)); desenhar(); return; }
+  const bo = ev.target.closest("[data-boletim]");
+  if (bo) { boletimSel = Number(bo.dataset.boletim); desenhar(); return; }
+  const ci = ev.target.closest("[data-oc]");
+  if (ci) {
+    let nota = "";
+    if (ci.dataset.oc === "encerrar") {
+      nota = prompt("Encerrar a ocorrência. Observação (opcional):", "");
+      if (nota === null) return;
+    }
+    ci.disabled = true;
+    const r = await post("/api/acao", { chave: ci.closest(".oc").dataset.chave, tipo: ci.dataset.oc, nota });
+    if (r.pronto !== undefined) { dados = r; desenhar(); }
+    return;
+  }
+  const b = ev.target.closest("[data-acao]");
+  if (!b) return;
+  const item = b.closest(".ag"); b.disabled = true;
+  const r = await post("/api/acao", { chave: item.dataset.chave, nome: item.dataset.nome, tipo_chat: item.dataset.tipo, tipo: b.dataset.acao, minutos: Number(b.dataset.min || 60) });
+  if (r && r.pronto !== undefined) { dados = r; desenhar(); }
+});
+$("btn-teste").addEventListener("click", async () => {
+  const r = await post("/api/teste-alerta");
+  if (r && r.ok) {
+    bip(true);
+    const s = (dados && dados.silencio) || { inicio: 20, fim: 7 };
+    alert(emSilencio()
+      ? `Alarme de teste disparado, mas agora é horário de silêncio (${s.inicio}h às ${s.fim}h): a notificação chega no celular em até 1 minuto, sem som.`
+      : "Alarme de teste disparado. O celular com o app deve tocar o alarme industrial em até 1 minuto.\n" +
+        (somLigado ? "Aqui no painel o alarme já tocou." : "Aqui no painel os alertas estão desligados (botão 🔇)."));
+  }
+});
+$("btn-sync").addEventListener("click", async () => { await post("/api/sincronizar"); $("t-sync").textContent = "SINCRONIZANDO…"; setTimeout(carregar, 3000); });
+const telaCheia = () => document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen().catch(() => {});
+$("btn-tela").addEventListener("click", telaCheia);
+document.addEventListener("keydown", e => { if (e.key.toLowerCase() === "f" && !e.target.closest("input, textarea")) telaCheia(); });
+
+/* ---------- mapa ---------- */
+let vista = "painel", mapa = null, camadas = {}, kmz = null, marcadores = {};
+function mudarVista(v) {
+  vista = v;
+  document.querySelectorAll("[data-vista]").forEach(b => b.classList.toggle("sel", b.dataset.vista === v));
+  $("vista-mapa").hidden = v !== "mapa";
+  $("vista-indicadores").hidden = v !== "indicadores";
+  $("vista-painel").hidden = $("vista-aovivo").hidden = v !== "painel";
+  if (v === "mapa") abrirMapa();
+  if (v === "indicadores") carregarIndicadores();
+}
+const chaveCodigo = c => { const m = /^([A-Z]{2,4})(\d)/.exec(c || ""); return m ? m[1] + m[2] : c; };  // CAR101 e CAR100 → CAR1
+function distanciaKm(a, b) {
+  const r = Math.PI / 180, dLat = (b.lat - a.lat) * r, dLon = (b.lon - a.lon) * r;
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * r) * Math.cos(b.lat * r) * Math.sin(dLon / 2) ** 2;
+  return 6371 * 2 * Math.asin(Math.sqrt(h));
+}
+async function abrirMapa() {
+  if (!window.L) { $("mapa").innerHTML = `<div class="vazio" style="padding:20px">Biblioteca do mapa não carregou.</div>`; return; }
+  if (!mapa) {
+    mapa = L.map("mapa", { zoomControl: true }).setView([-15.8, -47.9], 4);
+    const esri = "https://server.arcgisonline.com/ArcGIS/rest/services/";
+    const escuro = L.layerGroup([
+      L.tileLayer(esri + "Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}", { maxZoom: 16, attribution: "Mapa © Esri" }),
+      L.tileLayer(esri + "Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}", { maxZoom: 16 }),
+    ]).addTo(mapa);
+    const satelite = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+      { maxZoom: 19, attribution: "Imagens © Esri" });
+    camadas = { usinas: L.layerGroup().addTo(mapa), tecnicos: L.layerGroup().addTo(mapa), bases: L.layerGroup().addTo(mapa), clusters: L.layerGroup() };
+    L.control.layers({ "Mapa escuro": escuro, "Satélite": satelite },
+      { "Usinas": camadas.usinas, "Técnicos": camadas.tecnicos, "Bases": camadas.bases, "Clusters": camadas.clusters }, { collapsed: true }).addTo(mapa);
+  }
+  if (!kmz) {
+    try {
+      const r = await fetch(BASE + "/api/mapa", { headers: cabecalhos() });
+      kmz = await r.json();
+      try { localStorage.setItem("cache_mapa", JSON.stringify(kmz)); } catch {}
+    } catch { try { kmz = JSON.parse(localStorage.getItem("cache_mapa")); } catch {} }
+  }
+  setTimeout(() => mapa.invalidateSize(), 50);
+  desenharMapa(true);
+}
+function desenharMapa(enquadrar) {
+  if (!mapa || !kmz || !dados || !dados.pronto) return;
+  // estado de cada usina pelo código: ocorrência aberta (crítica/alerta) > normalizada > sem ocorrência
+  const estado = {}, ocPorCodigo = {};
+  const peso = { critico: 3, alerta: 2, normalizado: 1 };
+  for (const o of dados.ocorrencias || []) {
+    if (!o.codigo) continue;
+    for (const c of o.codigo.split("/").map((x, i, a) => i && /^\d+$/.test(x) ? a[0].replace(/\d+$/, "") + x : x)) {
+      const k = chaveCodigo(c), e = o.normalizado ? "normalizado" : o.sev;
+      if ((peso[e] || 0) > (peso[estado[k]] || 0)) { estado[k] = e; ocPorCodigo[k] = o; }
+    }
+  }
+  const nomes = kmz.codigos || {};
+  const tecnicos = kmz.pontos.filter(p => p.categoria === "tecnico");
+  const aberta = Object.keys(marcadores).find(n => marcadores[n].isPopupOpen());  // reabre depois de redesenhar
+  camadas.usinas.clearLayers(); camadas.tecnicos.clearLayers(); camadas.bases.clearLayers(); camadas.clusters.clearLayers();
+  marcadores = {};
+  const cores = { critico: "#ff4d5e", alerta: "#fbbf24", normalizado: "#3ee08a" };
+  const usinasKmz = kmz.pontos.filter(p => p.categoria === "usina");
+  // usinas: as normais primeiro, as com problema por cima
+  usinasKmz.sort((a, b) => (peso[estado[chaveCodigo(a.nome)]] || 0) - (peso[estado[chaveCodigo(b.nome)]] || 0)).forEach(p => {
+    const k = chaveCodigo(p.nome), e = estado[k], o = ocPorCodigo[k];
+    const cor = cores[e] || "#3a6ea5";
+    const raio = e === "critico" ? 9 : e === "alerta" ? 7 : e ? 5 : 4;
+    const m = L.circleMarker([p.lat, p.lon], { radius: raio, color: e ? "#000" : "#1b3a66", weight: 1, fillColor: cor, fillOpacity: e ? .95 : .7 });
+    const proximos = tecnicos.map(t => ({ t, km: distanciaKm(p, t) })).sort((a, b) => a.km - b.km).slice(0, 3);
+    m.bindPopup(`<b>${esc(p.nome)}</b>${nomes[p.nome] ? " · " + esc(nomes[p.nome]) : ""}<div style="color:var(--fraco)">${esc(p.grupo)}</div>
+      ${o ? `<div style="margin-top:6px;color:${cor}"><b style="color:${cor}">${o.normalizado ? "NORMALIZADA" : o.sev === "critico" ? "CRÍTICA" : "ALERTA"}</b> desde ${dhm(o.inicio_ts)}</div>
+        <div>${esc(o.msg.texto.slice(0, 220))}</div><div style="color:var(--fraco)">${esc(o.msg.de)}</div>` : `<div style="margin-top:6px;color:var(--fraco)">Sem ocorrência nas últimas 24 h.</div>`}
+      <div class="proximos"><div style="color:var(--rotulo);font-size:10px;letter-spacing:1px">TÉCNICOS MAIS PRÓXIMOS (linha reta)</div>
+        ${proximos.map(x => `<div><b>${esc(x.t.nome)}</b> <small style="color:var(--fraco)">${esc(x.t.grupo)}</small><span>${Math.round(x.km)} km</span></div>`).join("")}</div>`);
+    m.addTo(camadas.usinas);
+    if (e === "critico") L.marker([p.lat, p.lon], { interactive: false, icon: L.divIcon({ className: "pino-pulso", iconSize: [14, 14] }) }).addTo(camadas.usinas);
+    marcadores[p.nome] = m;
+  });
+  tecnicos.forEach(t => L.circleMarker([t.lat, t.lon], { radius: 4, color: "#b49bff", weight: 2, fillColor: "#2a1d55", fillOpacity: 1 })
+    .bindPopup(`<b>${esc(t.nome)}</b><div style="color:var(--fraco)">Técnico · ${esc(t.grupo)}</div>`).addTo(camadas.tecnicos));
+  kmz.pontos.filter(p => p.categoria === "base").forEach(b => L.marker([b.lat, b.lon], { icon: L.divIcon({ className: "", html: `<div style="width:12px;height:12px;background:#56ccff;border:2px solid #03060f;transform:rotate(45deg)"></div>`, iconSize: [12, 12] }) })
+    .bindPopup(`<b>${esc(b.nome)}</b><div style="color:var(--fraco)">Base operacional</div>`).addTo(camadas.bases));
+  kmz.areas.forEach(a => L.polygon(a.pontos, { color: "#56ccff", weight: 1, fillOpacity: .04, dashArray: "4 4" }).bindTooltip(a.nome).addTo(camadas.clusters));
+  if (enquadrar && usinasKmz.length) mapa.fitBounds(L.latLngBounds(usinasKmz.map(p => [p.lat, p.lon])), { padding: [20, 20] });
+  else if (aberta && marcadores[aberta]) marcadores[aberta].openPopup();
+
+  // lista ao lado: ocorrências abertas; as que têm lugar no mapa levam até ele
+  const abertas = (dados.ocorrencias || []).filter(o => !o.normalizado);
+  $("q-mapa").textContent = abertas.length;
+  $("mapa-lista").innerHTML = abertas.map(o => {
+    const alvo = o.codigo && usinasKmz.find(p => chaveCodigo(p.nome) === chaveCodigo(o.codigo.split("/")[0]));
+    return `<div class="item-mapa ${o.sev} ${alvo ? "" : "sem-local"}" ${alvo ? `data-ir="${esc(alvo.nome)}"` : `title="Sem código da usina para achar no mapa"`}>
+      <div style="display:flex;gap:6px"><b style="color:var(--titulo)">${esc(o.usina)}</b><span class="mono" style="margin-left:auto;color:var(--fraco)">${dur(agora() - o.inicio_ts)}</span></div>
+      <div style="color:var(--fraco);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(o.msg.texto)}</div></div>`;
+  }).join("") || `<div class="vazio">Nenhuma ocorrência aberta. ✅</div>`;
+}
+function irPara(nome) {
+  const m = marcadores[nome]; if (!m) return;
+  mapa.flyTo(m.getLatLng(), 11, { duration: .8 });
+  setTimeout(() => m.openPopup(), 850);
+}
+
+/* ---------- app Android: avisa quando o PC tem uma versão mais nova do app ---------- */
+async function verificarVersaoApp() {
+  if (!window.CentroApp || !CentroApp.versao) return;
+  try {
+    const r = await fetch(BASE + "/api/versao", { headers: cabecalhos(), cache: "no-store" });
+    const v = await r.json(), instalada = CentroApp.versao();
+    $("aviso-app").innerHTML = v.app > instalada
+      ? `<div class="nova-versao">⬆ Nova versão do app disponível (1.${v.app}; você tem a 1.${instalada}).
+           <button id="btn-atualizar-app">ATUALIZAR</button></div>` : "";
+    const b = $("btn-atualizar-app");
+    if (b) b.onclick = () => CentroApp.abrir(`${BASE}/app.apk?t=${encodeURIComponent(TOKEN)}`);
+  } catch {}
+}
+verificarVersaoApp();
+setInterval(verificarVersaoApp, 10 * 60000);
+
+/* ---------- detalhe da ocorrência (clique na ocorrência) ---------- */
+let ocAberta = null;
+function fecharDetalhe() {
+  ocAberta = null;
+  $("gaveta").classList.remove("aberta"); $("gaveta-fundo").classList.remove("aberta");
+  $("gaveta").setAttribute("aria-hidden", "true");
+}
+async function abrirDetalhe(chave) {
+  ocAberta = chave;
+  $("gaveta").classList.add("aberta"); $("gaveta-fundo").classList.add("aberta");
+  $("gaveta").setAttribute("aria-hidden", "false");
+  const o0 = (dados.ocorrencias || []).find(o => o.chave === chave);
+  if (o0) desenharDetalhe(o0, null);
+  else { $("gaveta-topo").innerHTML = ""; $("gaveta-corpo").innerHTML = `<div class="vazio">Carregando…</div>`; }
+  try {
+    const r = await fetch(`${BASE}/api/ocorrencia?chave=${encodeURIComponent(chave)}`, { headers: cabecalhos() });
+    const d = await r.json();
+    if (ocAberta !== chave) return;
+    if (d.erro) { $("gaveta-corpo").innerHTML = `<div class="vazio">${esc(d.erro)}</div>`; return; }
+    desenharDetalhe(Object.assign({}, d.ocorrencia, o0 ? { ciente: o0.ciente, encerrada_manual: o0.encerrada_manual, normalizado: o0.normalizado } : {}), d.mensagens);
+  } catch {
+    if (ocAberta === chave) $("gaveta-corpo").insertAdjacentHTML("afterbegin", `<div class="aviso" style="margin:0 0 10px">Sem conexão com o PC: a conversa não pôde ser carregada.</div>`);
+  }
+}
+// mensagem que cita o código de outra usina (comum nos grupos gerais do COG) fica apagada
+function deOutraUsina(m, o) {
+  if (m.aviso || m.normalizacao || !o.codigo) return false;
+  const meus = o.codigo.split("/").map(c => chaveCodigo(c));
+  const citados = [...(m.texto || "").matchAll(/UFV\s+([A-Z]{2,4}\d{3})/g)].map(x => chaveCodigo(x[1]));
+  return citados.length > 0 && !citados.some(c => meus.includes(c));
+}
+function desenharDetalhe(o, mensagens) {
+  const norm = o.normalizado;
+  const cor = norm ? "var(--verde)" : o.sev === "critico" ? "var(--vermelho)" : "var(--amarelo)";
+  const nivel = norm ? motivoBaixa(o) : o.sev === "critico" ? "CRÍTICA" : "ALERTA";
+  const duracao = norm ? `durou ${dur(norm.ts - o.inicio_ts)}` : `aberta há ${dur(agora() - o.inicio_ts)}`;
+  // ponto no mapa e técnicos mais próximos (quando a usina tem código e o KMZ já foi carregado)
+  let ponto = null, proximos = [];
+  if (o.codigo && kmz) {
+    ponto = kmz.pontos.find(p => p.categoria === "usina" && chaveCodigo(p.nome) === chaveCodigo(o.codigo.split("/")[0]));
+    if (ponto) proximos = kmz.pontos.filter(p => p.categoria === "tecnico").map(t => ({ t, km: distanciaKm(ponto, t) })).sort((a, b) => a.km - b.km).slice(0, 3);
+  }
+  $("gaveta-topo").innerHTML = `
+    <h3>${esc(o.usina)}</h3>
+    <div class="meta-g"><span class="sev" style="--cor:${cor}">${nivel}</span>${o.codigo ? `<span class="tag">${esc(o.codigo)}</span>` : ""}
+      <span class="mono">${dhm(o.inicio_ts)}${norm ? " → " + dhm(norm.ts) : ""}</span><span>· ${duracao}</span>${o.qtd > 1 ? `<span>· ${o.qtd} avisos</span>` : ""}${o.ciente ? `<span class="tag">CIENTE</span>` : ""}</div>
+    <div class="meta-g" style="margin-top:4px">${esc((o.grupos || []).join(" · "))}</div>
+    <div class="botoes">
+      ${!norm && !o.ciente ? `<button data-det="ciente">CIENTE</button>` : ""}
+      ${!norm ? `<button data-det="encerrar">ENCERRAR</button>` : ""}
+      ${norm ? `<button data-det="reabrir" title="A baixa foi errada: volta a ficar aberta">REABRIR</button>` : ""}
+      ${o.codigo ? `<button data-det="mapa">📍 VER NO MAPA</button>` : ""}
+    </div>`;
+  const tecnicos = proximos.length ? `<div class="secao">TÉCNICOS MAIS PRÓXIMOS (linha reta)</div>
+    <div class="proximos" style="border:0;margin:0;padding:0">${proximos.map(x => `<div><span style="color:var(--texto);font-family:inherit"><b>${esc(x.t.nome)}</b> <small style="color:var(--fraco)">${esc(x.t.grupo)}</small></span><span>${Math.round(x.km)} km</span></div>`).join("")}</div>` : "";
+  const resumo = `<div class="secao">O QUE FOI AVISADO</div>
+    <div class="msg-g aviso"><div class="cab"><b>${esc(o.msg.de)}</b><span class="mono">${dhm(o.msg.ts || o.inicio_ts)}</span></div><div class="t">${esc(o.msg.texto)}</div></div>
+    ${norm ? `<div class="secao">NORMALIZAÇÃO</div><div class="msg-g normalizacao"><div class="cab"><b>${esc(norm.de)}</b><span class="mono">${dhm(norm.ts)}</span></div><div class="t">${esc(norm.texto)}</div></div>` : ""}`;
+  let conversa;
+  if (!mensagens) conversa = `<div class="secao">CONVERSA</div><div class="vazio">Carregando a conversa…</div>`;
+  else if (!mensagens.length) conversa = `<div class="secao">CONVERSA</div><div class="vazio">Sem mensagens guardadas desse período.</div>`;
+  else {
+    const varios = new Set(mensagens.map(m => m.grupo)).size > 1;
+    conversa = `<div class="secao">CONVERSA · ${mensagens.length} MENSAGENS (30 MIN ANTES ATÉ ${norm ? "30 MIN DEPOIS DA NORMALIZAÇÃO" : "AGORA"})</div>` +
+      mensagens.map(m => `<div class="msg-g ${m.de === "você" ? "eu" : ""} ${m.aviso ? "aviso" : ""} ${m.normalizacao ? "normalizacao" : ""} ${deOutraUsina(m, o) ? "outra" : ""}">
+        <div class="cab"><b>${esc(m.de)}</b><span class="mono">${hm(m.ts)}</span>${varios ? `<span class="grupo-g">${esc(m.grupo)}</span>` : ""}</div>
+        <div class="t">${esc(m.texto)}</div></div>`).join("");
+  }
+  $("gaveta-corpo").innerHTML = tecnicos + resumo + conversa;
+  if (mensagens) {  // rola até o primeiro aviso
+    const primeiroAviso = [...$("gaveta-corpo").querySelectorAll(".msg-g.aviso")][1];
+    if (primeiroAviso) primeiroAviso.scrollIntoView({ block: "center" });
+  }
+  $("gaveta-topo").dataset.chave = o.chave;
+  $("gaveta-topo").dataset.codigo = o.codigo || "";
+}
+$("gaveta-fechar").addEventListener("click", fecharDetalhe);
+// botão Voltar do Android: fecha o detalhe, depois sai do mapa; devolve false quando não há o que voltar
+window.voltar = () => {
+  if (ocAberta) { fecharDetalhe(); return true; }
+  if (vista !== "painel") { mudarVista("painel"); return true; }
+  return false;
+};
+$("gaveta-fundo").addEventListener("click", fecharDetalhe);
+document.addEventListener("keydown", e => { if (e.key === "Escape") fecharDetalhe(); });
+document.addEventListener("click", async ev => {
+  const b = ev.target.closest("[data-det]");
+  if (b) {
+    const chave = $("gaveta-topo").dataset.chave, acao = b.dataset.det;
+    if (acao === "mapa") {
+      const codigo = $("gaveta-topo").dataset.codigo;
+      fecharDetalhe(); mudarVista("mapa");
+      const ir = () => { const p = kmz && kmz.pontos.find(x => x.categoria === "usina" && chaveCodigo(x.nome) === chaveCodigo(codigo.split("/")[0])); if (p) irPara(p.nome); };
+      setTimeout(ir, kmz ? 300 : 1500);
+      return;
+    }
+    let nota = "";
+    if (acao === "encerrar") { nota = prompt("Encerrar a ocorrência. Observação (opcional):", ""); if (nota === null) return; }
+    b.disabled = true;
+    const r = await post("/api/acao", { chave, tipo: acao, nota });
+    if (r.pronto !== undefined) { dados = r; desenhar(); abrirDetalhe(chave); }
+    return;
+  }
+  // clique na ocorrência (fora dos botões dela) abre o detalhe
+  const oc = ev.target.closest(".oc");
+  if (oc && !ev.target.closest("button")) abrirDetalhe(oc.dataset.chave);
+});
+// o mapa (e os técnicos próximos) também servem ao detalhe: carrega o KMZ em segundo plano
+(async () => { try { const r = await fetch(BASE + "/api/mapa", { headers: cabecalhos() }); kmz = await r.json(); } catch { try { kmz = JSON.parse(localStorage.getItem("cache_mapa")); } catch {} } })();
+
+/* ---------- dica (tooltip) dos gráficos ---------- */
+document.addEventListener("mousemove", ev => {
+  const alvo = ev.target.closest("[data-dica]"), d = $("dica");
+  if (!alvo) { d.style.display = "none"; return; }
+  d.textContent = alvo.dataset.dica; d.style.display = "block";
+  const x = Math.min(ev.clientX + 14, innerWidth - d.offsetWidth - 8), y = Math.min(ev.clientY + 14, innerHeight - d.offsetHeight - 8);
+  d.style.left = x + "px"; d.style.top = y + "px";
+});
+document.addEventListener("touchstart", () => { $("dica").style.display = "none"; }, { passive: true });
+
+/* ---------- linha do tempo: cada ocorrência do aviso até a normalização ---------- */
+function desenharLinhaDoTempo() {
+  const d = dados, agoraS = agora();
+  const p = d.plantao || {};
+  // no plantão: desde o início dele (até 48 h); fora do plantão: últimas 24 h
+  const ini = p.ativo ? Math.max(p.inicio_ts, agoraS - 48 * 3600) : agoraS - 24 * 3600;
+  const total = agoraS - ini;
+  $("t-tl").textContent = p.ativo ? `LINHA DO TEMPO · PLANTÃO (desde ${dhm(ini)})` : "LINHA DO TEMPO · 24 H";
+  const ocs = (d.ocorrencias || []).filter(o => !o.generico && ((o.normalizado ? o.normalizado.ts : agoraS) >= ini))
+    .sort((a, b) => a.inicio_ts - b.inicio_ts);
+  $("q-tl").textContent = ocs.length;
+  const pos = ts => Math.max(0, Math.min(100, (ts - ini) / total * 100));
+  // marcas do eixo a cada 3 h (ou 6 h quando passa de 24 h)
+  const passo = (total > 26 * 3600 ? 6 : 3) * 3600;
+  const marcas = [];
+  for (let t = Math.ceil(ini / passo) * passo; t <= agoraS; t += passo) marcas.push(t);
+  const fmtEixo = t => { const x = new Date(t * 1000); return x.getHours() === 0 ? x.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" }) : String(x.getHours()).padStart(2, "0") + "h"; };
+  $("tl-eixo").innerHTML = marcas.map(t => `<span style="left:${pos(t)}%">${fmtEixo(t)}</span>`).join("");
+  const grade = marcas.map(t => `<div class="tl-grade" style="left:${pos(t)}%"></div>`).join("") + `<div class="tl-agora" style="left:100%"></div>`;
+  $("tl-linhas").innerHTML = ocs.length ? ocs.map(o => {
+    const fim = o.normalizado ? o.normalizado.ts : agoraS;
+    const motivo = (o.normalizado || {}).motivo;
+    const cor = !o.normalizado ? (o.sev === "critico" ? "var(--vermelho)" : "var(--amarelo)") : motivo === "inatividade" ? "#64748b" : "var(--verde)";
+    const estado = !o.normalizado ? (o.sev === "critico" ? "Crítica, aberta" : "Alerta, aberto") : motivoBaixa(o).toLowerCase();
+    const dica = `${o.usina}\n${estado}\n${dhm(o.inicio_ts)} → ${o.normalizado ? dhm(fim) : "agora"} · ${dur(fim - o.inicio_ts)}\n${o.msg.texto.slice(0, 120)}`;
+    return `<div class="tl-linha" data-tl="${esc(o.chave)}" data-dica="${esc(dica)}"><div class="tl-nome">${esc(o.usina)}</div>
+      <div class="tl-trilho">${grade}<div class="tl-barra ${o.normalizado ? "" : "aberta"}" style="--cor:${cor};left:${pos(o.inicio_ts)}%;width:${Math.max(0.6, pos(fim) - pos(o.inicio_ts))}%"></div></div></div>`;
+  }).join("") : `<div class="vazio">Nenhuma ocorrência no período.</div>`;
+}
+document.addEventListener("click", ev => { const l = ev.target.closest("[data-tl]"); if (l) abrirDetalhe(l.dataset.tl); });
+
+/* ---------- indicadores ---------- */
+let indDias = 7, indCliente = "";
+const AZUL_SERIE = "#3987e5";  // série única (magnitude): azul da paleta categórica, passo do modo escuro
+async function carregarIndicadores() {
+  $("nota-ind").textContent = "carregando…";
+  try {
+    const r = await fetch(`${BASE}/api/indicadores?dias=${indDias}&cliente=${encodeURIComponent(indCliente)}`, { headers: cabecalhos() });
+    const d = await r.json();
+    if (!d.pronto && d.pronto !== undefined) { $("nota-ind").textContent = "o painel ainda está sincronizando…"; return; }
+    try { localStorage.setItem("cache_ind_" + indDias, JSON.stringify(d)); } catch {}
+    desenharIndicadores(d);
+  } catch {
+    let d = null; try { d = JSON.parse(localStorage.getItem("cache_ind_" + indDias)); } catch {}
+    if (d) { desenharIndicadores(d); $("nota-ind").textContent += " · PC offline: dados guardados"; }
+    else $("nota-ind").textContent = "sem conexão com o PC";
+  }
+}
+function barrasH(id, itens, rotulo, segmentos, valor, vazio) {
+  const max = Math.max(1, ...itens.map(i => segmentos.reduce((s, g) => s + (i[g.campo] || 0), 0)));
+  $(id).innerHTML = itens.length ? itens.map(i => {
+    const total = segmentos.reduce((s, g) => s + (i[g.campo] || 0), 0);
+    const dica = rotulo(i) + "\n" + segmentos.filter(g => i[g.campo]).map(g => `${g.nome}: ${i[g.campo]}`).join("\n");
+    return `<div class="hb" data-dica="${esc(dica)}"><span class="r">${esc(rotulo(i))}</span>
+      <span class="trilho">${segmentos.filter(g => i[g.campo]).map(g => `<span class="seg" style="--cor:${g.cor};width:${i[g.campo] / max * 100}%"></span>`).join("")}</span>
+      <span class="v">${valor ? valor(i) : total}</span></div>`;
+  }).join("") : `<div class="vazio">${vazio || "Sem dados no período."}</div>`;
+}
+function colunas(id, idx, itens, segmentos, rotuloX, dicaX) {
+  const max = Math.max(1, ...itens.map(i => segmentos.reduce((s, g) => s + (i[g.campo] || 0), 0)));
+  $(id).innerHTML = itens.map(i => {
+    const dica = dicaX(i) + "\n" + segmentos.map(g => `${g.nome}: ${i[g.campo] || 0}`).join("\n");
+    return `<div class="col" data-dica="${esc(dica)}">${segmentos.filter(g => i[g.campo]).map(g =>
+      `<div class="seg" style="--cor:${g.cor};height:${i[g.campo] / max * 100}%"></div>`).join("")}</div>`;
+  }).join("");
+  const cada = Math.max(1, Math.ceil(itens.length / 12));  // no máximo ~12 rótulos no eixo
+  $(idx).innerHTML = itens.map((i, n) => `<span>${n % cada === 0 ? esc(rotuloX(i)) : ""}</span>`).join("");
+}
+function desenharIndicadores(d) {
+  const r = d.resumo;
+  $("i-total").textContent = r.total; $("i-usinas").textContent = `${r.usinas} usinas`;
+  $("i-crit").textContent = r.criticas;
+  $("i-mttr").textContent = r.mediana_h == null ? "—" : r.mediana_h < 1 ? Math.round(r.mediana_h * 60) + " min" : r.mediana_h.toLocaleString("pt-BR") + " h";
+  $("i-mttr-s").textContent = `mediana · ${r.confirmadas} confirmadas`;
+  $("i-abertas").textContent = r.abertas;
+  const nCh = d.chamados_usina.reduce((s, u) => s + u.total, 0);
+  $("i-chamados").textContent = nCh; $("i-chamados-s").textContent = `${d.chamados_usina.reduce((s, u) => s + u.abertos, 0)} ainda abertos`;
+  const sel = $("filtro-cliente"), atual = indCliente;
+  sel.innerHTML = `<option value="">Todos os clientes</option>` + d.clientes.map(c => `<option ${c === atual ? "selected" : ""}>${esc(c)}</option>`).join("");
+  $("nota-ind").textContent = `histórico desde ${new Date(d.importado_desde * 1000).toLocaleDateString("pt-BR")}`;
+
+  const porHora = d.passo === 3600;
+  $("t-serie").textContent = porHora ? "OCORRÊNCIAS POR HORA" : "OCORRÊNCIAS POR DIA";
+  const crit = { campo: "critico", nome: "Críticas", cor: "var(--vermelho)" }, alerta = { campo: "alerta", nome: "Alertas", cor: "var(--amarelo)" };
+  colunas("g-serie", "g-serie-x", d.serie, [crit, alerta],
+    i => porHora ? new Date(i.t * 1000).getHours() + "h" : new Date(i.t * 1000).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" }),
+    i => porHora ? dhm(i.t) : new Date(i.t * 1000).toLocaleDateString("pt-BR", { weekday: "short", day: "2-digit", month: "2-digit" }));
+  barrasH("g-reinc", d.reincidencia.map(u => Object.assign({}, u, { alertas: u.total - u.criticas })), u => u.usina,
+    [{ campo: "criticas", nome: "Críticas", cor: "var(--vermelho)" }, { campo: "alertas", nome: "Alertas", cor: "var(--amarelo)" }]);
+  barrasH("g-mttr", d.tempo_usina, u => u.usina, [{ campo: "mediana_h", nome: "Mediana (h)", cor: AZUL_SERIE }],
+    u => (u.mediana_h < 1 ? Math.round(u.mediana_h * 60) + "min" : u.mediana_h.toLocaleString("pt-BR") + "h"), "Nenhuma normalização confirmada no período.");
+  barrasH("g-tipos", d.tipos, t => t.tipo, [{ campo: "n", nome: "Ocorrências", cor: AZUL_SERIE }]);
+  barrasH("g-clientes", d.por_cliente, c => c.cliente, [{ campo: "n", nome: "Ocorrências", cor: AZUL_SERIE }]);
+  colunas("g-meses", "g-meses-x", d.chamados_mes,
+    [{ campo: "Resolvido", nome: "Resolvido", cor: "var(--verde)" }, { campo: "Em andamento", nome: "Em andamento", cor: "var(--amarelo)" }, { campo: "Pendente", nome: "Pendente", cor: "var(--vermelho)" }],
+    i => { const [a, m] = i.mes.split("-"); return new Date(+a, +m - 1, 1).toLocaleDateString("pt-BR", { month: "short", year: "2-digit" }); },
+    i => i.mes);
+  barrasH("g-ch-usina", d.chamados_usina.map(u => Object.assign({}, u, { resolvidos: u.total - u.abertos })), u => u.usina,
+    [{ campo: "abertos", nome: "Abertos", cor: "var(--vermelho)" }, { campo: "resolvidos", nome: "Resolvidos", cor: AZUL_SERIE }]);
+  barrasH("g-tarefas", d.tarefas_tecnico, t => t.tecnico,
+    [{ campo: "abertas", nome: "Abertas", cor: "var(--amarelo)" }, { campo: "concluidas", nome: "Concluídas", cor: "var(--verde)" }]);
+}
+document.addEventListener("click", ev => {
+  const b = ev.target.closest("[data-dias]");
+  if (!b) return;
+  indDias = Number(b.dataset.dias);
+  document.querySelectorAll("[data-dias]").forEach(x => x.classList.toggle("sel", x === b));
+  carregarIndicadores();
+});
+$("filtro-cliente").addEventListener("change", e => { indCliente = e.target.value; carregarIndicadores(); });
+
+/* ---------- conectar celular (QR de sincronização) ---------- */
+async function abrirConectarCelular() {
+  $("modal-celular").hidden = false; $("modal-fundo").classList.add("aberta");
+  $("qr-celular").innerHTML = ""; $("nota-celular").textContent = "Gerando…";
+  try {
+    const d = await (await fetch("/api/pareamento")).json();
+    if (!d.url) {
+      $("nota-celular").innerHTML = "Este PC não está no <b>Tailscale</b> (ou ele não está instalado). Instale e entre no Tailscale, depois abra esta janela de novo.";
+      return;
+    }
+    const q = qrcode(0, "M"); q.addData(d.url); q.make();
+    $("qr-celular").innerHTML = q.createSvgTag({ cellSize: 6, margin: 2, scalable: true });
+    $("nota-celular").innerHTML = `Endereço do PC no Tailscale: <b>${esc(d.ip)}</b>. Não mostre este QR para outras pessoas: ele dá acesso ao seu painel.`;
+  } catch { $("nota-celular").textContent = "Não consegui gerar o QR."; }
+}
+function fecharModal() { $("modal-celular").hidden = true; $("modal-fundo").classList.remove("aberta"); }
+$("btn-celular").addEventListener("click", abrirConectarCelular);
+$("modal-fundo").addEventListener("click", fecharModal);
+document.addEventListener("click", e => { if (e.target.closest("[data-fechar-modal]")) fecharModal(); });
+document.addEventListener("keydown", e => { if (e.key === "Escape") fecharModal(); });
+
+/* ---------- atualização do PC (nova versão publicada no GitHub) ---------- */
+const noPC = !window.CentroApp && ["127.0.0.1", "localhost", "[::1]"].includes(location.hostname);
+async function verificarVersaoPC() {
+  if (!noPC) return;
+  try {
+    const v = await (await fetch("/api/versao", { cache: "no-store" })).json();
+    $("aviso-pc").innerHTML = v.pc_nova
+      ? `<div class="nova-versao">⬆ Nova versão do Centro de Operações: <b>v${v.ultima}</b> (você tem a v${v.pc}).
+           <button id="btn-atualizar-pc">ATUALIZAR AGORA</button></div>` : "";
+    const b = $("btn-atualizar-pc");
+    if (b) b.onclick = async () => {
+      b.disabled = true; b.textContent = "atualizando…";
+      const r = await (await fetch("/api/atualizar", { method: "POST" })).json().catch(() => ({}));
+      if (!r.ok) { alert(r.erro || "Não consegui atualizar."); b.disabled = false; b.textContent = "ATUALIZAR AGORA"; return; }
+      $("aviso-pc").innerHTML = `<div class="nova-versao">Atualizado. Reiniciando o painel…</div>`;
+      for (let i = 0; i < 40; i++) {
+        await new Promise(s => setTimeout(s, 1500));
+        try { const x = await fetch("/api/versao", { cache: "no-store" }); if (x.ok) { location.reload(); return; } } catch {}
+      }
+    };
+  } catch {}
+}
+verificarVersaoPC();
+setInterval(verificarVersaoPC, 30 * 60000);
+
+// nome da organização no topo; PWA (só quando a página vem do servidor, não dentro do app Android)
+function aplicarPerfil() {
+  const p = (dados && dados.perfil) || {};
+  $("subtitulo").textContent = (p.organizacao ? p.organizacao.toUpperCase() + " · " : "") + "WHATSAPP AO VIVO" + (p.versao ? " · v" + p.versao : "");
+}
+if ("serviceWorker" in navigator && location.protocol.startsWith("http") && !window.CentroApp) {
+  navigator.serviceWorker.register("sw.js").catch(() => {});
+}
+
+carregar();
+setInterval(carregar, 15000);
+setInterval(() => { if (!document.querySelector(".menu.aberto")) desenhar(); }, 30000);
+</script>
+</body>
+</html>

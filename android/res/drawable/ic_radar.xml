@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- radar: anéis azuis e um ponto vermelho de ocorrência (área segura do ícone adaptável: 66 dp no centro) -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <path android:strokeColor="#56CCFF" android:strokeWidth="3" android:fillColor="#00000000"
+        android:pathData="M54,25a29,29 0 1,0 0.01,0z" />
+    <path android:strokeColor="#2B5FA8" android:strokeWidth="2" android:fillColor="#00000000"
+        android:pathData="M54,38a16,16 0 1,0 0.01,0z" />
+    <path android:strokeColor="#56CCFF" android:strokeWidth="3"
+        android:pathData="M54,54 L74,34" />
+    <path android:fillColor="#56CCFF" android:pathData="M54,49a5,5 0 1,0 0.01,0z" />
+    <path android:fillColor="#FF4D5E" android:pathData="M68,62a4.5,4.5 0 1,0 0.01,0z" />
+</vector>

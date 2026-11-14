@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Centro de Operações</title>
+<style>
+  html, body { margin: 0; min-height: 100%; background: #03060f; color: #e2e8f0; font: 15px/1.5 system-ui, sans-serif; }
+  .c { min-height: 100vh; display: flex; align-items: center; justify-content: center; letter-spacing: 2px; color: #7d8fb5; }
+  .parear { padding: 34px 22px; max-width: 520px; margin: 0 auto; }
+  h1 { font-size: 19px; letter-spacing: 2px; color: #dbeafe; margin: 0 0 4px; }
+  h1 span { color: #56ccff; }
+  .sub { color: #7d8fb5; font-size: 12px; letter-spacing: 1.5px; margin-bottom: 26px; }
+  ol { padding-left: 20px; color: #c3cde3; } li { margin-bottom: 10px; }
+  b { color: #dbeafe; }
+  .caixa { margin-top: 22px; padding: 14px; border: 1px solid #16264d; border-radius: 12px; background: #070d1d; }
+  input { width: 100%; box-sizing: border-box; padding: 11px; border-radius: 8px; border: 1px solid #2b4a99; background: #0b1428; color: #e2e8f0; font: inherit; font-size: 13px; }
+  button { margin-top: 10px; width: 100%; padding: 13px; border-radius: 10px; border: 1px solid #1e7a4c; background: #0b2a1d; color: #3ee08a; font: inherit; font-weight: 700; letter-spacing: 1px; }
+  .erro { color: #ff8a96; font-size: 13px; margin-top: 8px; }
+</style>
+<script src="config.js"></script>
+</head>
+<body>
+<div class="c" id="carregando">CARREGANDO…</div>
+<script>
+// Abertura do app. Sem PC conectado: mostra como parear (QR do PC). Conectado: busca a tela mais recente do painel
+// no PC (pelo Tailscale) e guarda; com o PC offline, usa a última guardada; se nunca baixou, usa a que veio no APK.
+(async function () {
+  const cfg = window.CENTRO || {};
+  if (!cfg.base || !cfg.token) { mostrarPareamento(); return; }
+  const ler = k => { try { return localStorage.getItem(k); } catch { return null; } };
+  const gravar = (k, v) => { try { localStorage.setItem(k, v); } catch {} };
+  let html = null, nova = false;
+  try {
+    const ctl = new AbortController();
+    setTimeout(() => ctl.abort(), 5000);
+    const r = await fetch(cfg.base.replace(/\/$/, "") + "/painel.html", {
+      headers: { Authorization: "Bearer " + cfg.token }, cache: "no-store", signal: ctl.signal });
+    if (r.ok) {
+      html = await r.text();
+      if (html.includes("CENTRO DE OPERAÇÕES")) {
+        const antiga = ler("tela_html");
+        nova = !!antiga && antiga !== html;
+        gravar("tela_html", html);
+      } else html = null;
+    }
+  } catch (e) {}
+  html = html || ler("tela_html");
+  if (!html) { location.replace("painel.html"); return; }
+  if (nova) {
+    html = html.replace("</body>", `<div id="aviso-tela" style="position:fixed;left:50%;bottom:22px;transform:translateX(-50%);z-index:9999;
+      background:#0b2a1d;color:#3ee08a;border:1px solid #1e7a4c;border-radius:10px;padding:9px 16px;font:600 12px system-ui;letter-spacing:.5px">
+      ✓ Painel atualizado</div><script>setTimeout(()=>{const a=document.getElementById("aviso-tela");a&&a.remove()},4000)<\/script></body>`);
+  }
+  document.open();
+  document.write(html);
+  document.close();
+})();
+
+function mostrarPareamento() {
+  document.getElementById("carregando").remove();
+  document.body.insertAdjacentHTML("beforeend", `
+  <div class="parear">
+    <h1><span>◉</span> CENTRO DE OPERAÇÕES</h1>
+    <div class="sub">CONECTE ESTE CELULAR AO SEU PC</div>
+    <ol>
+      <li>No PC, abra o <b>Centro de Operações</b> e toque em <b>📱 Conectar celular</b>.</li>
+      <li>Aqui no celular, ligue o <b>Tailscale</b> (a mesma conta do PC).</li>
+      <li>Abra a <b>câmera</b>, aponte para o QR do PC e toque no link.</li>
+      <li>Na página que abrir, toque em <b>CONECTAR ESTE CELULAR</b>.</li>
+    </ol>
+    <div class="caixa">
+      <div style="font-size:13px;color:#9fb0d4">Ou cole aqui o link do QR (começa com http://100.):</div>
+      <input id="link" placeholder="http://100.x.x.x:47900/parear?t=..." autocomplete="off" autocapitalize="off" spellcheck="false">
+      <button id="conectar">CONECTAR</button>
+      <div class="erro" id="erro"></div>
+    </div>
+  </div>`);
+  document.getElementById("conectar").onclick = () => {
+    const ok = window.CentroApp && CentroApp.conectar(document.getElementById("link").value);
+    if (!ok) document.getElementById("erro").textContent = "Link inválido. Use o link completo do QR, com ?t=.";
+  };
+}
+</script>
+</body>
+</html>

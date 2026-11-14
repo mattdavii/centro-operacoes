@@ -1,0 +1,676 @@
+#!/usr/bin/env python3
+# Centro de Operações: painel local de plantão sobre o wa-app (WhatsApp, só leitura).
+# Sincroniza com o wa-app (só leitura) a cada minuto e serve a página em http://127.0.0.1:47900
+# As marcações feitas no painel (respondi, resolvido, ignorar, lembrar depois) ficam em acoes.json,
+# só neste computador; nada é escrito no WhatsApp nem na planilha.
+import hmac, http.server, ipaddress, json, mimetypes, os, sys, threading, time, traceback, urllib.parse
+
+PASTA = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, PASTA)
+import coletor, config, indicadores, mapa, relatorio  # noqa: E402
+
+PORTA = int(os.environ.get("ATENDIMENTOS_PORTA") or config.carregar().get("porta") or 47900)
+INTERVALO = 60
+DADOS = config.DADOS
+ACOES = os.path.join(DADOS, "acoes.json")
+PLANTAO = os.path.join(DADOS, "plantao.json")  # {"inicio": "2026-11-14T00:00", "fim": "2026-11-16T08:00", "equipe": [...]}
+
+trava = threading.Lock()
+estado = {"dados": None, "sincronizando": False, "erro": None, "cache": {}, "teste": None}
+TESTE_DURA = 180  # o alarme de teste fica "aberto" por 3 min, o suficiente para o celular consultar e tocar
+
+
+def ler_acoes():
+    try:
+        with open(ACOES, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def gravar_acoes(acoes):
+    os.makedirs(os.path.dirname(ACOES), exist_ok=True)
+    tmp = ACOES + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(acoes, f, ensure_ascii=False, indent=1)
+    os.replace(tmp, ACOES)
+
+
+def _plantao_bruto():
+    try:
+        with open(PLANTAO, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def _plantao_gravar(p):
+    os.makedirs(DADOS, exist_ok=True)
+    tmp = PLANTAO + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(p, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, PLANTAO)
+
+
+def ler_plantao():
+    """Plantão atual (iniciado no botão do painel) e os anteriores, com o relatório de cada um.
+    plantao.json: {"atual": {"inicio_ts", "titulo", "equipe"} | null, "historico": [{..., "fim_ts", "relatorio"}]}"""
+    p = _plantao_bruto()
+    atual = p.get("atual")
+    return {"ativo": bool(atual), "inicio_ts": (atual or {}).get("inicio_ts"), "titulo": (atual or {}).get("titulo"),
+            "equipe": (atual or {}).get("equipe"), "padrao": p.get("padrao") or {},
+            "historico": (p.get("historico") or [])[-10:][::-1]}
+
+
+def plantao_iniciar(titulo, equipe):
+    p = _plantao_bruto()
+    if p.get("atual"):
+        return p["atual"]
+    p["atual"] = {"inicio_ts": int(time.time()), "titulo": titulo or "Plantão", "equipe": equipe or []}
+    p["padrao"] = {"titulo": p["atual"]["titulo"], "equipe": p["atual"]["equipe"]}  # sugestão para o próximo
+    _plantao_gravar(p)
+    return p["atual"]
+
+
+def plantao_finalizar(painel):
+    p = _plantao_bruto()
+    atual = p.get("atual")
+    if not atual:
+        return None
+    fim = int(time.time())
+    plantao = {"titulo": atual.get("titulo"), "equipe": atual.get("equipe")}
+    arquivo = relatorio.salvar(atual["inicio_ts"], fim, painel, plantao)
+    item = dict(atual, fim_ts=fim, relatorio=arquivo)
+    p["historico"] = (p.get("historico") or []) + [item]
+    p["atual"] = None
+    _plantao_gravar(p)
+    print("plantão finalizado; relatório em", arquivo, flush=True)
+    return item
+
+
+def montar():
+    """Junta a última coleta com as marcações do painel. Uma marcação vale até chegar mensagem nova
+    na conversa depois dela (aí o item volta para a lista) ou, no caso de "lembrar", até a hora marcada."""
+    d = estado["dados"]
+    if not d:
+        return {"pronto": False, "sincronizando": estado["sincronizando"], "erro": estado["erro"]}
+    agora = time.time()
+    acoes = ler_acoes()
+    aguardando, adiados, resolvidos = [], [], []
+    for p in d["pendentes"]:
+        a = acoes.get(p["chave"])
+        item = dict(p, acao=None)
+        if a and p["ultima_ts"] <= a["ts"]:
+            if a["tipo"] == "lembrar" and agora < a.get("ate", 0):
+                adiados.append(dict(item, acao=a))
+                continue
+            if a["tipo"] in ("respondi", "resolvido", "ignorar"):
+                if a["tipo"] == "resolvido":
+                    resolvidos.append(dict(item, acao=a))
+                continue
+        aguardando.append(item)
+    for chave, a in acoes.items():  # resolvidos que já saíram da coleta continuam no histórico do dia
+        if a["tipo"] == "resolvido" and agora - a["ts"] < 86400 and not any(r["chave"] == chave for r in resolvidos):
+            resolvidos.append({"chave": chave, "nome": a.get("nome", chave), "tipo": a.get("tipo_chat", ""),
+                               "acao": a, "previa": []})
+    ocorrencias, usinas = ocorrencias_com_acoes(d, acoes)
+    abertos = lambda linhas, t: [l for l in linhas if coletor.aberto(l.get("status"), t)]
+    # fechados mais recentemente atualizados primeiro (um chamado antigo resolvido hoje aparece em "Resolvidos hoje")
+    fechados = lambda linhas: sorted([l for l in linhas if not coletor.aberto(l.get("status"), "chamado")
+                                      and not coletor.aberto(l.get("status"), "tarefa")],
+                                     key=lambda l: str(l.get("atualizado") or ""), reverse=True)
+    return {
+        "pronto": True, "sincronizando": estado["sincronizando"], "erro": estado["erro"],
+        "quando": d["quando"], "whatsapp": d["whatsapp"], "erros": d["erros"],
+        "aguardando": aguardando, "adiados": adiados, "resolvidos": resolvidos,
+        "chamados": abertos(d["chamados"], "chamado"), "tarefas": abertos(d["tarefas"], "tarefa"),
+        "chamados_fechados": fechados(d["chamados"])[:40], "tarefas_fechadas": fechados(d["tarefas"])[:20],
+        "ocorrencias": ocorrencias, "usinas": usinas, "boletins": d["boletins"], "feed": d["feed"], "atividade": d["atividade"],
+        "plantao": ler_plantao(), "silencio": ler_silencio(),
+        "perfil": perfil(),
+    }
+
+
+def acoes_por_mensagem(acoes):
+    """{id da mensagem: {"ciente"|"enc"|"keep": ação}} a partir das ocorrências do histórico que têm marcação."""
+    hist = relatorio._ler(relatorio.HIST, {})
+    out = {}
+    for chave, a in acoes.items():
+        tipo, base = ("enc", chave[4:]) if chave.startswith("enc:") else ("keep", chave[5:]) if chave.startswith("keep:") \
+            else ("ciente", chave) if a.get("tipo") == "ciente" else (None, None)
+        if not tipo:
+            continue
+        for mid in set(a.get("ids") or []) | set((hist.get(base) or {}).get("ids") or []):
+            out.setdefault(mid, {})[tipo] = a
+    return out
+
+
+def ocorrencias_com_acoes(d, acoes):
+    """Aplica 'ciente' e 'encerrar' do painel. Uma ocorrência encerrada à mão volta a abrir se chegar
+    aviso novo da mesma usina depois do encerramento. O estado das usinas é recalculado em seguida."""
+    # as marcações valem pelas MENSAGENS da ocorrência, não só pela identificação dela: se a ocorrência for
+    # remontada (outra identificação), quem compartilha um aviso com a antiga herda o ciente/encerrar/reabrir
+    por_msg = acoes_por_mensagem(acoes)
+    ocorrencias = []
+    for o in d["ocorrencias"]:
+        herdadas = {}
+        for mid in o.get("ids") or []:
+            for tipo, a in por_msg.get(mid, {}).items():
+                if tipo not in herdadas or a["ts"] > herdadas[tipo]["ts"]:
+                    herdadas[tipo] = a
+        o = dict(o, ciente=o["chave"] in acoes or "ciente" in herdadas, encerrada_manual=False)
+        # "reabrir" desfaz uma baixa automática errada (ou por inatividade), até chegar uma normalização nova
+        manter = acoes.get("keep:" + o["chave"]) or herdadas.get("keep")
+        if manter and o["normalizado"] and o["normalizado"].get("ts", 0) <= manter["ts"]:
+            o["normalizado"], o["reaberta"] = None, True
+        enc = acoes.get("enc:" + o["chave"]) or herdadas.get("enc")
+        if enc and not o["normalizado"] and o["ultima_ts"] <= enc["ts"]:
+            o["normalizado"] = {"ts": enc["ts"], "de": "você", "motivo": "manual", "texto": "encerrada no painel" +
+                                (f": {enc['nota']}" if enc.get("nota") else "")}
+            o["encerrada_manual"] = True
+        ocorrencias.append(o)
+    ocorrencias.sort(key=lambda o: (o["normalizado"] is not None, -o["ultima_ts"]))
+    usinas = []
+    for u in d["usinas"]:
+        u = dict(u)
+        oc = [o for o in ocorrencias if o["chave_usina"] == u["jid"]]
+        if oc:
+            abertas = [o for o in oc if not o["normalizado"]]
+            u["abertas"] = len(abertas)
+            u["estado"] = "critico" if any(o["sev"] == "critico" for o in abertas) else "alerta" if abertas else "normalizado"
+        usinas.append(u)
+    ordem = {"critico": 0, "alerta": 1, "normalizado": 2, "ativa": 3, "quieta": 4}
+    usinas.sort(key=lambda u: (ordem[u["estado"]], -(u["ultima_ts"] or 0)))
+    # código da usina (o mesmo do KMZ) para os grupos que o COG nunca citou com código: casa pelo nome aprendido
+    conhecidos = [(c, coletor.assinatura(n)) for c, n in relatorio.codigos().items()]
+    for u in usinas:
+        if not u.get("codigo"):
+            ass = coletor.assinatura(u["nome"])
+            u["codigo"] = next((c for c, a in conhecidos if coletor.mesma_usina(ass, a)), None)
+    por_jid = {u["jid"]: u.get("codigo") for u in usinas}
+    for o in ocorrencias:
+        if not o.get("codigo"):
+            o["codigo"] = por_jid.get(o["chave_usina"])
+    return ocorrencias, usinas
+
+
+def sincronizar_sempre():
+    cache = estado["cache"]  # as conversas lidas ficam aqui; o detalhe da ocorrência mostra as mensagens delas
+    while True:
+        estado["sincronizando"] = True
+        try:
+            dados = coletor.coletar(cache=cache, log=lambda s: print(time.strftime("%H:%M:%S"), s, flush=True))
+            with trava:
+                estado["dados"], estado["erro"] = dados, None
+                painel = montar()
+            registrar(painel)
+        except Exception as e:
+            estado["erro"] = f"sincronização falhou: {e}"
+            traceback.print_exc()
+        estado["sincronizando"] = False
+        acordar.wait(INTERVALO)
+        acordar.clear()
+
+
+acordar = threading.Event()
+
+
+def ler_token():
+    """Senha do acesso remoto (celular pelo Tailscale). Criada na primeira vez, só neste PC."""
+    caminho = os.path.join(DADOS, "token")
+    try:
+        with open(caminho, encoding="utf-8") as f:
+            t = f.read().strip()
+            if len(t) >= 24:
+                return t
+    except OSError:
+        pass
+    import secrets
+    t = secrets.token_urlsafe(24)
+    os.makedirs(DADOS, exist_ok=True)
+    with open(os.open(caminho, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as f:
+        f.write(t)
+    return t
+
+
+TOKEN = ler_token()
+TAILSCALE = ipaddress.ip_network("100.64.0.0/10")
+_mapa = {"mtime": None, "dados": None}
+
+
+def dados_mapa():
+    """Pontos e polígonos do KMZ das usinas (lido de novo só quando o arquivo muda)."""
+    caminho = config.kmz()
+    try:
+        mt = os.path.getmtime(caminho)
+    except OSError:
+        return {"erro": "Sem KMZ das usinas: coloque o arquivo em " + caminho + " (ou indique o caminho em config.json, campo kmz)",
+                "pontos": [], "areas": [], "codigos": relatorio.codigos()}
+    if _mapa["mtime"] != mt:
+        _mapa["dados"], _mapa["mtime"] = mapa.ler_kmz(caminho), mt
+    return dict(_mapa["dados"], codigos=relatorio.codigos())
+
+
+def detalhe_ocorrencia(chave):
+    """A ocorrência e a conversa dos grupos onde ela apareceu: de 30 min antes do primeiro aviso até
+    30 min depois da normalização (ou até agora, se ainda está aberta)."""
+    with trava:
+        painel = montar()
+    o = next((x for x in painel.get("ocorrencias", []) if x["chave"] == chave), None)
+    if not o:
+        o = relatorio._ler(relatorio.HIST, {}).get(chave)
+    if not o:
+        return 404, {"erro": "ocorrência não encontrada (pode ter saído da janela de 24 h)"}
+    ini = o["inicio_ts"] - 1800
+    fim = ((o.get("normalizado") or {}).get("ts") or time.time()) + 1800
+    destaque = set(o.get("ids") or [o["msg"].get("id")])
+    mensagens = []
+    for jid in o.get("jids") or [o.get("jid")]:
+        guardado = estado["cache"].get(jid) or {}
+        dados = guardado.get("dados") or {}
+        grupo = (dados.get("chat") or {}).get("name") or jid
+        for m in dados.get("messages") or []:
+            if ini <= m.get("ts", 0) <= fim:
+                c = coletor.compacta(m)
+                c["texto"] = coletor.texto(m)[:1500]
+                c.update(grupo=grupo, aviso=m.get("id") in destaque,
+                         normalizacao=bool(o.get("normalizado")) and m.get("id") == o["normalizado"].get("id"))
+                mensagens.append(c)
+    mensagens.sort(key=lambda m: m["ts"])
+    if len(mensagens) > 200:  # conversa muito longa: fica o entorno dos avisos e o fim
+        marcas = [i for i, m in enumerate(mensagens) if m["aviso"] or m["normalizacao"]]
+        manter = {j for i in marcas for j in range(max(0, i - 8), min(len(mensagens), i + 12))} | set(range(len(mensagens) - 40, len(mensagens)))
+        mensagens = [m for i, m in enumerate(mensagens) if i in manter]
+    return 200, {"ocorrencia": o, "mensagens": mensagens}
+
+
+STATUS_DIARIO = {"chamado": ("Resolvido", "Em andamento", "Pendente"),
+                 "tarefa": ("Pendente", "Em andamento", "Concluída", "Cancelada")}
+
+
+def diario_atualizar(corpo):
+    """Muda o status (e acrescenta uma observação) de um chamado ou tarefa na planilha do Diário, pelo ID.
+    Usa o próprio diario.py, que faz cópia de segurança antes de gravar e recusa se a planilha estiver aberta."""
+    tipo, id_, status = corpo.get("tipo"), str(corpo.get("id") or ""), corpo.get("status")
+    nota = str(corpo.get("nota") or "").strip()[:500]
+    if tipo not in STATUS_DIARIO or not id_ or (status and status not in STATUS_DIARIO[tipo]) or not (status or nota):
+        return 400, {"erro": "pedido inválido"}
+    lista = (estado["dados"] or {}).get("chamados" if tipo == "chamado" else "tarefas") or []
+    atual = next((l for l in lista if l.get("id") == id_), None)
+    if not atual:
+        return 404, {"erro": "não achei esse item no Diário (ele foi digitado à mão, sem ID?)"}
+    item = {"id": id_, "_painel": True}
+    if status:
+        item["status"] = status
+    if nota or status:
+        campo = "descricao" if tipo == "chamado" else "andamento"
+        registro = f"[{time.strftime('%d/%m %H:%M')} painel] " + (f"{status}. " if status else "") + nota
+        item[campo] = ((atual.get(campo) or "").rstrip() + "\n" + registro).strip()
+    import subprocess, tempfile
+    py, script = config.diario()
+    if not script:
+        return 400, {"erro": "o Diário de Chamados não está configurado nesta instalação"}
+    with tempfile.NamedTemporaryFile("w", suffix=".json", dir=DADOS, delete=False, encoding="utf-8") as f:
+        json.dump([item], f, ensure_ascii=False)
+        arq = f.name
+    try:
+        r = subprocess.run([py, script, "chamados" if tipo == "chamado" else "tarefas", arq],
+                           capture_output=True, text=True, timeout=90, encoding="utf-8")
+    finally:
+        os.unlink(arq)
+    if r.returncode:
+        return 409, {"erro": (r.stderr.strip().splitlines() or ["o Diário recusou a gravação"])[-1]}
+    chamados, _ = coletor.diario("chamados")
+    tarefas, _ = coletor.diario("tarefas")
+    with trava:
+        if estado["dados"]:
+            estado["dados"]["chamados"], estado["dados"]["tarefas"] = chamados, tarefas
+        return 200, montar()
+
+
+def perfil():
+    c = config.carregar()
+    return {"nome": c.get("nome_usuario") or "", "organizacao": c.get("organizacao") or "",
+            "diario": bool(config.diario()[1]), "versao": versao_local()}
+
+
+def ler_silencio():
+    """Horário sem som (config.json: silencio_inicio / silencio_fim, horas cheias). Padrão: 20h às 7h."""
+    c = config.carregar()
+    return {"inicio": int(c.get("silencio_inicio", 20)), "fim": int(c.get("silencio_fim", 7))}
+
+
+def teste_alarme():
+    """Ocorrência falsa, marcada como teste, para conferir se o celular toca (botão TESTAR ALARME do painel)."""
+    t = estado.get("teste")
+    if not t or time.time() - t > TESTE_DURA:
+        return []
+    return [{"chave": f"teste|{int(t)}", "sev": "critico", "usina": "TESTE DO ALARME",
+             "texto": "Teste disparado no painel. Se tocou o alarme industrial, está tudo certo.", "inicio_ts": int(t), "ciente": True}]
+
+
+APK_PADRAO = f"https://github.com/{config.REPOSITORIO}/releases/latest/download/CentroOperacoes.apk"
+_release = {"quando": 0, "versao": 0, "apk": APK_PADRAO, "notas": ""}
+
+
+def versao_local():
+    """Versão desta instalação (arquivo VERSAO na raiz do projeto, o mesmo número da Release no GitHub)."""
+    try:
+        with open(os.path.join(PASTA, "VERSAO"), encoding="utf-8") as f:
+            return int(f.read().strip() or 0)
+    except (OSError, ValueError):
+        return 0
+
+
+def ultima_release():
+    """Última versão publicada no GitHub (consulta no máximo a cada 30 min; sem internet, fica a última conhecida)."""
+    if time.time() - _release["quando"] < 1800:
+        return _release
+    _release["quando"] = time.time()
+    try:
+        import urllib.request
+        req = urllib.request.Request(f"https://api.github.com/repos/{config.REPOSITORIO}/releases/latest",
+                                     headers={"Accept": "application/vnd.github+json", "User-Agent": "centro-operacoes"})
+        with urllib.request.urlopen(req, timeout=10) as r:
+            d = json.load(r)
+        _release["versao"] = int(str(d.get("tag_name", "v0")).lstrip("vV") or 0)
+        _release["notas"] = (d.get("body") or "")[:1500]
+        _release["apk"] = next((a["browser_download_url"] for a in d.get("assets", []) if a["name"].endswith(".apk")), APK_PADRAO)
+    except Exception:
+        pass
+    return _release
+
+
+def versoes():
+    """tela: muda a cada edição do painel; pc: versão instalada aqui; ultima: a publicada no GitHub;
+    app: versão do APK que o celular deve ter (a publicada, ou um APK gerado aqui mesmo mais novo)."""
+    import hashlib
+    with open(os.path.join(PASTA, "painel.html"), "rb") as f:
+        tela = hashlib.sha1(f.read()).hexdigest()[:12]
+    try:
+        with open(os.path.join(PASTA, "dist", "versao.json"), encoding="utf-8") as f:
+            local_apk = int(json.load(f).get("app", 0))
+    except (OSError, ValueError):
+        local_apk = 0
+    rel = ultima_release()
+    pc = versao_local()
+    return {"tela": tela, "pc": pc, "ultima": rel["versao"], "pc_nova": rel["versao"] > pc, "notas": rel["notas"],
+            "app": max(rel["versao"], local_apk), "apk": rel["apk"]}
+
+
+def ip_tailscale():
+    import shutil, subprocess
+    exe = shutil.which("tailscale")
+    if not exe:
+        return None
+    try:
+        r = subprocess.run([exe, "ip", "-4"], capture_output=True, text=True, timeout=5)
+        return (r.stdout.split() or [None])[0]
+    except Exception:
+        return None
+
+
+def pagina_parear(base, token):
+    """Página que o celular abre ao escanear o QR do PC: baixa o app (se precisar) e conecta este celular."""
+    import html as h, urllib.parse as up
+    q = up.urlencode({"base": base, "t": token})
+    apk = versoes()["apk"]
+    intent = (f"intent://parear?{q}#Intent;scheme=centrooperacoes;package=com.mateus.centrooperacoes;"
+              f"S.browser_fallback_url={up.quote(apk, safe='')};end")
+    return f"""<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Conectar ao Centro de Operações</title><style>
+body{{margin:0;background:#03060f;color:#e2e8f0;font:16px/1.5 system-ui,sans-serif;padding:28px 20px}}
+h1{{font-size:20px;letter-spacing:1px;color:#dbeafe}} p{{color:#9fb0d4}}
+a.b{{display:block;text-align:center;padding:16px;border-radius:12px;margin:14px 0;font-weight:700;letter-spacing:.5px;text-decoration:none}}
+.p{{background:#0b2a1d;color:#3ee08a;border:1px solid #1e7a4c}} .s{{background:#0d1938;color:#56ccff;border:1px solid #2b4a99}}
+small{{color:#7d8fb5}}</style></head><body>
+<h1>◉ CENTRO DE OPERAÇÕES</h1>
+<p>Este celular vai receber os alarmes do PC <b>{h.escape(base)}</b>.</p>
+<a class="b p" href="{h.escape(intent)}">CONECTAR ESTE CELULAR</a>
+<p><small>Ainda não tem o app? Baixe e instale primeiro (só Android), depois volte e toque em Conectar:</small></p>
+<a class="b s" href="{h.escape(apk)}">BAIXAR O APP (APK)</a>
+<p><small>O celular precisa estar no mesmo Tailscale do PC. Não compartilhe este QR: ele dá acesso ao seu painel.</small></p>
+</body></html>"""
+
+
+def atualizar_pc():
+    """git pull e reinício do servidor (só pelo próprio PC). O reinício é feito trocando o processo por um novo."""
+    import subprocess, threading
+    r = subprocess.run(["git", "-C", PASTA, "pull", "--ff-only"], capture_output=True, text=True, timeout=120)
+    saida = (r.stdout + r.stderr).strip()[-800:]
+    if r.returncode:
+        return 409, {"erro": "não consegui atualizar: " + saida}
+    _release["quando"] = 0
+    threading.Timer(1.5, lambda: os.execv(sys.executable, [sys.executable] + sys.argv)).start()
+    return 200, {"ok": True, "saida": saida}
+
+
+class Pagina(http.server.BaseHTTPRequestHandler):
+    def log_message(self, *a):
+        pass
+
+    # ---------- quem pode entrar ----------
+    def token_ok(self):
+        h = self.headers.get("Authorization", "")
+        q = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query).get("t", [""])[0]
+        return hmac.compare_digest(h, "Bearer " + TOKEN) or (q and hmac.compare_digest(q, TOKEN))
+
+    def permitido(self):
+        ip = ipaddress.ip_address(self.client_address[0])
+        if ip.is_loopback:
+            return True
+        return ip in TAILSCALE and self.token_ok()  # celular e outros aparelhos do Tailscale, só com a senha
+
+    def responder(self, codigo, corpo, tipo="application/json; charset=utf-8", cache=False):
+        dados = corpo if isinstance(corpo, bytes) else json.dumps(corpo, ensure_ascii=False).encode()
+        self.send_response(codigo)
+        self.send_header("Content-Type", tipo)
+        self.send_header("Cache-Control", "max-age=86400" if cache else "no-store")
+        if self.token_ok():  # o app do celular lê de outra origem; só libera para quem tem a senha
+            self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Content-Length", str(len(dados)))
+        self.end_headers()
+        self.wfile.write(dados)
+
+    def do_OPTIONS(self):
+        self.send_response(204)
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Authorization, Content-Type")
+        self.send_header("Access-Control-Max-Age", "86400")
+        self.end_headers()
+
+    def do_GET(self):
+        if not self.permitido():
+            return self.responder(403, {"erro": "acesso negado"})
+        url = urllib.parse.urlsplit(self.path)
+        caminho, q = url.path, urllib.parse.parse_qs(url.query)
+        if caminho == "/api/versao":
+            return self.responder(200, versoes())
+        if caminho in ("/", "/index.html", "/painel.html"):
+            with open(os.path.join(PASTA, "painel.html"), "rb") as f:
+                return self.responder(200, f.read(), "text/html; charset=utf-8")
+        if caminho == "/api/indicadores":
+            try:
+                dias = max(1, min(45, int(q.get("dias", ["7"])[0])))
+            except ValueError:
+                dias = 7
+            with trava:
+                painel = montar()
+                d = estado["dados"] or {}
+                base = {"ocorrencias": painel.get("ocorrencias", []), "chamados": d.get("chamados", []),
+                        "tarefas": d.get("tarefas", [])}
+            if not painel.get("pronto"):
+                return self.responder(200, {"pronto": False})
+            return self.responder(200, indicadores.calcular(dias, q.get("cliente", [""])[0], base, dados_mapa()))
+        if caminho == "/api/ocorrencia":
+            return self.responder(*detalhe_ocorrencia(q.get("chave", [""])[0]))
+        if caminho in ("/manifest.webmanifest", "/sw.js", "/icone-192.png", "/icone-512.png", "/icone.svg"):
+            tipos = {".webmanifest": "application/manifest+json", ".js": "application/javascript", ".png": "image/png", ".svg": "image/svg+xml"}
+            with open(os.path.join(PASTA, "pwa", caminho.lstrip("/")), "rb") as f:
+                return self.responder(200, f.read(), tipos[os.path.splitext(caminho)[1]])
+        if caminho == "/parear":
+            ip = ip_tailscale()
+            base = f"http://{ip}:{PORTA}" if ip else f"http://{self.headers.get('Host')}"
+            return self.responder(200, pagina_parear(base, TOKEN).encode(), "text/html; charset=utf-8")
+        if caminho == "/api/pareamento":
+            # só no próprio PC: devolve o link (com a senha) que vira o QR de sincronização do celular
+            if not ipaddress.ip_address(self.client_address[0]).is_loopback:
+                return self.responder(403, {"erro": "só no PC"})
+            ip = ip_tailscale()
+            return self.responder(200, {"ip": ip, "url": f"http://{ip}:{PORTA}/parear?t={TOKEN}" if ip else None,
+                                        "apk": versoes()["apk"]})
+        if caminho == "/app.apk":  # o celular baixa daqui a versão nova: o APK gerado neste PC ou o publicado no GitHub
+            apk = os.path.join(PASTA, "dist", "CentroOperacoes.apk")
+            v = versoes()
+            if not os.path.isfile(apk) or v["app"] > (json.load(open(os.path.join(PASTA, "dist", "versao.json"))).get("app", 0)
+                                                      if os.path.isfile(os.path.join(PASTA, "dist", "versao.json")) else 0):
+                self.send_response(302)
+                self.send_header("Location", v["apk"])
+                self.end_headers()
+                return
+            with open(apk, "rb") as f:
+                corpo = f.read()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/vnd.android.package-archive")
+            self.send_header("Content-Disposition", f'attachment; filename="CentroOperacoes-v{versoes()["app"]}.apk"')
+            self.send_header("Content-Length", str(len(corpo)))
+            self.end_headers()
+            self.wfile.write(corpo)
+            return
+        if caminho.startswith("/vendor/"):
+            alvo = os.path.normpath(os.path.join(PASTA, caminho.lstrip("/")))
+            if not alvo.startswith(os.path.join(PASTA, "vendor") + os.sep) or not os.path.isfile(alvo):
+                return self.responder(404, {"erro": "não encontrado"})
+            tipo = mimetypes.guess_type(alvo)[0] or "application/octet-stream"
+            with open(alvo, "rb") as f:
+                return self.responder(200, f.read(), tipo, cache=True)
+        if caminho == "/api/dados":
+            with trava:
+                return self.responder(200, montar())
+        if caminho == "/api/mapa":
+            return self.responder(200, dados_mapa())
+        if caminho == "/api/alertas":
+            # resumo leve para o serviço de notificações do celular (consulta a cada minuto)
+            with trava:
+                p = montar()
+            if not p.get("pronto"):
+                return self.responder(200, {"pronto": False})
+            return self.responder(200, {
+                "pronto": True, "quando": p["quando"], "whatsapp": (p.get("whatsapp") or {}).get("conexao"),
+                "app_versao": versoes()["app"], "silencio": ler_silencio(),
+                "plantao": (p.get("plantao") or {}).get("ativo"),
+                "ocorrencias": [{"chave": o["chave"], "sev": o["sev"], "usina": o["usina"], "texto": o["msg"]["texto"][:200],
+                                 "inicio_ts": o["inicio_ts"], "ciente": o["ciente"]} for o in p["ocorrencias"] if not o["normalizado"]]
+                               + teste_alarme(),
+                "marcacoes": [{"chave": a["chave"], "nome": a["nome"], "desde_ts": a["desde_ts"],
+                               "texto": (a["previa"][0] if a["previa"] else {}).get("texto", "")[:200]}
+                              for a in p["aguardando"] if a.get("motivo") == "marcou você"],
+            })
+        if caminho == "/config.js":  # no app Android este arquivo traz o endereço do PC e a senha; aqui fica vazio
+            return self.responder(200, b"", "application/javascript")
+        if caminho == "/relatorio":
+            plantao = ler_plantao()
+            fim = float(q["fim"][0]) if "fim" in q else time.time()
+            inicio = float(q["inicio"][0]) if "inicio" in q else plantao["inicio_ts"] if plantao["ativo"] else fim - 86400
+            with trava:
+                painel = montar()
+            pagina, _ = relatorio.montar(inicio, fim, painel, plantao)
+            return self.responder(200, pagina.encode(), "text/html; charset=utf-8")
+        self.responder(404, {"erro": "não encontrado"})
+
+    def do_POST(self):
+        if not self.permitido():
+            return self.responder(403, {"erro": "acesso negado"})
+        # no PC, sem a senha, só aceita pedidos da própria página (nunca de outro site aberto no navegador)
+        origem = self.headers.get("Origin", "")
+        if not self.token_ok() and origem and origem not in (f"http://127.0.0.1:{PORTA}", f"http://localhost:{PORTA}"):
+            return self.responder(403, {"erro": "origem não permitida"})
+        try:
+            corpo = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0)) or 0) or b"{}")
+        except ValueError:
+            return self.responder(400, {"erro": "json inválido"})
+        if self.path == "/api/sincronizar":
+            acordar.set()
+            return self.responder(200, {"ok": True})
+        if self.path == "/api/atualizar":
+            if not ipaddress.ip_address(self.client_address[0]).is_loopback:
+                return self.responder(403, {"erro": "a atualização só pode ser feita no próprio PC"})
+            return self.responder(*atualizar_pc())
+        if self.path == "/api/teste-alerta":
+            estado["teste"] = time.time()
+            return self.responder(200, {"ok": True, "dura_seg": TESTE_DURA})
+        if self.path == "/api/diario":
+            return self.responder(*diario_atualizar(corpo))
+        if self.path == "/api/plantao":
+            with trava:
+                if corpo.get("acao") == "iniciar":
+                    equipe = corpo.get("equipe") or []
+                    if isinstance(equipe, str):
+                        equipe = [e.strip() for e in equipe.split(",") if e.strip()]
+                    plantao_iniciar(str(corpo.get("titulo") or "")[:80], [str(e)[:40] for e in equipe][:10])
+                    return self.responder(200, montar())
+                if corpo.get("acao") == "finalizar":
+                    painel = montar()
+                    if painel.get("pronto"):
+                        relatorio.registrar(painel["ocorrencias"], estado["dados"].get("codigos"))
+                    item = plantao_finalizar(painel)
+                    if not item:
+                        return self.responder(400, {"erro": "não há plantão ativo"})
+                    return self.responder(200, dict(montar(), finalizado=item))
+            return self.responder(400, {"erro": "ação de plantão inválida"})
+        if self.path == "/api/acao":
+            chave, tipo = corpo.get("chave"), corpo.get("tipo")
+            if not chave or tipo not in ("respondi", "resolvido", "ignorar", "lembrar", "desfazer", "ciente", "encerrar", "reabrir"):
+                return self.responder(400, {"erro": "ação inválida"})
+            with trava:
+                acoes = ler_acoes()
+                atual = next((o for o in (estado["dados"] or {}).get("ocorrencias", []) if o["chave"] == chave), None)
+                ids = (atual or {}).get("ids") or []
+                if tipo == "desfazer":
+                    acoes.pop(chave, None)
+                elif tipo == "reabrir":
+                    acoes.pop("enc:" + chave, None)
+                    acoes["keep:" + chave] = {"tipo": "reabrir", "ts": int(time.time()), "ids": ids}
+                elif tipo == "encerrar":
+                    acoes["enc:" + chave] = {"tipo": "encerrar", "ts": int(time.time()), "nota": str(corpo.get("nota", ""))[:200], "ids": ids}
+                else:
+                    a = {"tipo": tipo, "ts": int(time.time()), "nome": corpo.get("nome", ""),
+                         "tipo_chat": corpo.get("tipo_chat", "")}
+                    if tipo == "lembrar":
+                        a["ate"] = int(time.time() + 60 * max(5, min(int(corpo.get("minutos", 60)), 7 * 1440)))
+                    if ids:
+                        a["ids"] = ids
+                    acoes[chave] = a
+                # limpa marcações velhas (mais de 7 dias)
+                acoes = {k: v for k, v in acoes.items() if time.time() - v["ts"] < 7 * 86400}
+                gravar_acoes(acoes)
+                painel = montar()
+                registrar(painel)
+                return self.responder(200, painel)
+        self.responder(404, {"erro": "não encontrado"})
+
+
+def registrar(painel):
+    """Histórico de ocorrências e, quando o plantão termina, a passagem de plantão salva em Documentos."""
+    if not painel.get("pronto"):
+        return
+    try:
+        relatorio.registrar(painel["ocorrencias"], estado["dados"].get("codigos"))
+    except Exception:
+        traceback.print_exc()
+
+
+if __name__ == "__main__":
+    threading.Thread(target=sincronizar_sempre, daemon=True).start()
+    # 0.0.0.0 para o celular chegar pelo Tailscale; quem não é deste PC nem do Tailscale com a senha é recusado
+    for tentativa in range(20):
+        try:
+            servidor = http.server.ThreadingHTTPServer(("0.0.0.0", PORTA), Pagina)
+            break
+        except OSError:
+            time.sleep(1)
+    else:
+        raise SystemExit(f"a porta {PORTA} está ocupada")
+    print(f"Centro de Operações em http://127.0.0.1:{PORTA} (e pelo Tailscale, com a senha)", flush=True)
+    servidor.serve_forever()

@@ -1,0 +1,10 @@
+# gerados
+__pycache__/
+android/build/
+dist/
+# nada de senha/chave no repositório (ficam em ~/.local/share/atendimentos, com backup próprio)
+*.keystore
+token
+# ferramentas locais de quem publica
+.venv-docs/
+android/sons/
