@@ -188,6 +188,8 @@ NORMAL_FATO = re.compile(
     r"\b(voltou|voltaram|retornou|retornaram)\b(?! a (falhar|cair|desarmar|alarmar))|"
     r"\b(ja )?(esta|estao|segue|seguem) (gerando|operando|comunicando|normal)\b|"
     r"\bgerando normal|\boperando normal|"
+    r"\b(esta|estao|segue|seguem|encontra-se|encontram-se) (em operacao|ok|operante)\b|"
+    r"\b(confirm|constat|verific)\w* que [^.?!]{0,40}\b(esta|estao|estava|estavam) (ok|normal|em operacao|operando|gerando)\b|"
     r"\bfoi realizad[oa] o? ?(fechamento|religamento|rearme)\b|\bfechamento realizado\b")
 # o que desfaz a afirmação, quando aparece pouco antes da palavra
 NEGACAO = re.compile(r"\b(nao|n|nem|nunca|sem|ainda nao)\s+(\w+\s+){0,2}$")

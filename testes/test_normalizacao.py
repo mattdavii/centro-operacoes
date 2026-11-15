@@ -22,10 +22,15 @@ DA_BAIXA = [
     "Pode encerrar a OS 5688, usina comunicando",
     "OS 5690 finalizada",
     "Normalizado",
+    "*UFV ABC200 – Usina 2* > Com auxilio da vigilância novamente, constatamos que os inversores estão em operação",
+    "a vigilância confirmou que estava ok",
     "@COG foi identificado o dinjuntor do padrão de entrada desarmado ( em trip) após as devidas verificações nada de anormal foi constatado disjuntor foi fechado",
     "* *UFV QSS100 – Quissamã 100* *🔌🟥 Ocorrência: Disjuntor 52L aberto* > Proteções atuadas: > • 27 (Subtensão) > Horário do desarme: 18h26min *🔌🟩 Normalização: Disjuntor 52L Fechado* > Horário de fechamento: 19h02min",
 ]
 NAO_DA_BAIXA = [
+    "inversor 3 ainda não está em operação",
+    "vamos verificar se está ok",
+    "confirmou que estava ok antes do desarme, agora está parado",
     "No COV consta como disjuntor fechado, porém, via Fusion a usina não comunica há uns 15 minutos",
     "Boa tarde! @COG Cliente , movimentei o Tracker 02, via bateria externa para 0⁰, fiz o reset, vou esperar um pouco e restabelecer o mesmo!",
     "@Fulano COG me pontuou que o Inversor 6 do projeto não retornou para funcionamento",
