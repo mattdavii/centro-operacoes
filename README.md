@@ -7,6 +7,7 @@ Ele lê os grupos e conversas e mostra, ao vivo:
 - **Manutenções e técnicos em campo**: atividades do COG (início, concluída, cancelada) e entrada/saída dos técnicos nas usinas; ocorrência que começa durante uma manutenção é marcada e não toca alarme. Aba **Manutenções** para acompanhar e encerrar na mão quando o grupo não avisar.
 - **Conversas aguardando você** (privado, ou grupo onde te marcaram/citaram).
 - **Mapa** das usinas (a partir do seu KMZ), com os técnicos mais próximos de cada ocorrência.
+- **Tempo nas usinas**: chuva, trovoada e rajada na hora de cada ocorrência (Open-Meteo, grátis e sem chave) e os avisos meteorológicos do INMET sobre as usinas, no painel, no mapa, nos indicadores e no relatório. Só as coordenadas das usinas (arredondadas a ~10 km) saem do PC.
 - **Indicadores**: ocorrências por dia, usinas reincidentes, tempo até normalizar, tipos de falha, por cliente.
 - **Plantão**: iniciar/finalizar, linha do tempo e relatório de passagem (PDF e texto para WhatsApp).
 - **App Android** com alarme (horário de silêncio configurável), cache offline e conexão por QR.

@@ -1,0 +1,310 @@
+# Tempo nas usinas: previsão/observação por hora do Open-Meteo (grátis, sem chave) e avisos meteorológicos
+# ativos do INMET. Serve para interpretar as ocorrências ("desarmou durante trovoada") e avisar antes.
+# Só saem do PC as coordenadas das usinas, arredondadas a 0,1° (~10 km): nenhum nome, código ou mensagem.
+import json, math, os, threading, time, urllib.parse, urllib.request
+
+import config
+
+ARQ = os.path.join(config.DADOS, "clima.json")
+OPEN_METEO = "https://api.open-meteo.com/v1/forecast"
+HISTORICO = "https://historical-forecast-api.open-meteo.com/v1/forecast"
+INMET = "https://apiprevmet3.inmet.gov.br/avisos/ativos"
+VALIDADE = 30 * 60          # atualiza a cada 30 min
+CAMPOS = "temperature_2m,precipitation,weather_code,wind_gusts_10m,cloud_cover,shortwave_radiation"
+_trava = threading.Lock()
+_cache = {"dados": None}
+
+# códigos WMO do Open-Meteo
+TEMPO = {0: ("☀️", "céu limpo"), 1: ("🌤️", "poucas nuvens"), 2: ("⛅", "parcialmente nublado"), 3: ("☁️", "nublado"),
+         45: ("🌫️", "neblina"), 48: ("🌫️", "neblina"), 51: ("🌦️", "garoa"), 53: ("🌦️", "garoa"), 55: ("🌦️", "garoa forte"),
+         56: ("🌧️", "garoa congelante"), 57: ("🌧️", "garoa congelante"), 61: ("🌧️", "chuva fraca"), 63: ("🌧️", "chuva"),
+         65: ("🌧️", "chuva forte"), 66: ("🌧️", "chuva congelante"), 67: ("🌧️", "chuva congelante"),
+         80: ("🌦️", "pancadas"), 81: ("🌧️", "pancadas fortes"), 82: ("⛈️", "pancadas violentas"),
+         95: ("⛈️", "trovoada"), 96: ("⛈️", "trovoada com granizo"), 99: ("⛈️", "trovoada com granizo")}
+
+
+def chave_codigo(c):
+    """CAR101 e CAR100 → CAR1 (mesma regra do mapa)."""
+    import re
+    m = re.match(r"^([A-Z]{2,4})(\d)", str(c or "").split("/")[0].strip().upper())
+    return m.group(1) + m.group(2) if m else None
+
+
+def _local(lat, lon):
+    return f"{round(lat, 1):.1f},{round(lon, 1):.1f}"
+
+
+def _get(url, timeout=30):
+    req = urllib.request.Request(url, headers={"User-Agent": "centro-operacoes"})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return json.loads(r.read().decode("utf-8"))
+
+
+def _ler():
+    if _cache["dados"] is None:
+        try:
+            with open(ARQ, encoding="utf-8") as f:
+                _cache["dados"] = json.load(f)
+        except (OSError, ValueError):
+            _cache["dados"] = {}
+    return _cache["dados"]
+
+
+def _gravar(d):
+    tmp = ARQ + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(d, f, ensure_ascii=False)
+    os.replace(tmp, ARQ)
+    _cache["dados"] = d
+
+
+def _dentro(lat, lon, geo):
+    """Ponto dentro do Polygon/MultiPolygon GeoJSON (coordenadas [lon, lat])."""
+    polis = geo.get("coordinates") or []
+    if geo.get("type") == "Polygon":
+        polis = [polis]
+    for poli in polis:
+        if not poli:
+            continue
+        anel, dentro = poli[0], False
+        j = len(anel) - 1
+        for i in range(len(anel)):
+            xi, yi = anel[i][0], anel[i][1]
+            xj, yj = anel[j][0], anel[j][1]
+            if (yi > lat) != (yj > lat) and lon < (xj - xi) * (lat - yi) / ((yj - yi) or 1e-12) + xi:
+                dentro = not dentro
+            j = i
+        if dentro:
+            return True
+    return False
+
+
+def _avisos(pontos):
+    """Avisos do INMET (hoje e próximos), com as usinas que estão dentro da área de cada um."""
+    bruto = _get(INMET, timeout=40)
+    saida = []
+    for quando in ("hoje", "futuro"):
+        for a in bruto.get(quando) or []:
+            if str(a.get("encerrado")).lower() == "true":
+                continue
+            try:
+                geo = json.loads(a.get("poligono") or "{}")
+            except ValueError:
+                continue
+            dentro = sorted({p["codigo"] for p in pontos if _dentro(p["lat"], p["lon"], geo)})
+            if not dentro:
+                continue
+            saida.append({"id": a.get("id"), "descricao": a.get("descricao"), "severidade": a.get("severidade"),
+                          "cor": a.get("aviso_cor"), "inicio": a.get("inicio"), "fim": a.get("fim"),
+                          "quando": quando, "riscos": str(a.get("riscos") or "").strip("[]'\"")[:400],
+                          "usinas": dentro, "geo": geo})
+    return saida
+
+
+def atualizar(pontos, forcar=False):
+    """pontos: [{"codigo","lat","lon"}] das usinas do KMZ. Busca o tempo (se passou da validade) e grava."""
+    if not pontos or not _trava.acquire(blocking=False):
+        return
+    try:
+        d = _ler()
+        if not forcar and time.time() - d.get("ts", 0) < VALIDADE:
+            return
+        locais = sorted({_local(p["lat"], p["lon"]) for p in pontos})
+        tempo, erro = {}, None
+        for i in range(0, len(locais), 50):
+            lote = locais[i:i + 50]
+            q = urllib.parse.urlencode({
+                "latitude": ",".join(l.split(",")[0] for l in lote), "longitude": ",".join(l.split(",")[1] for l in lote),
+                "hourly": CAMPOS, "current": CAMPOS, "past_days": 3, "forecast_days": 2,
+                "timezone": "America/Sao_Paulo", "timeformat": "unixtime"})
+            try:
+                r = _get(OPEN_METEO + "?" + q)
+                for l, x in zip(lote, r if isinstance(r, list) else [r]):
+                    tempo[l] = {"atual": x.get("current"), "hora": x.get("hourly")}
+            except Exception as e:
+                erro = f"Open-Meteo: {e}"
+        try:
+            avisos = _avisos(pontos)
+        except Exception as e:
+            avisos, erro = d.get("avisos", []), f"INMET: {e}"
+        _gravar({"ts": time.time() if tempo else d.get("ts", 0), "tempo": tempo or d.get("tempo", {}),
+                 "avisos": avisos, "erro": erro, "historico": _ler().get("historico") or {},
+                 "usinas": {p["codigo"]: _local(p["lat"], p["lon"]) for p in pontos}})
+        try:
+            import relatorio  # completa o tempo das ocorrências antigas, aos poucos
+            preencher_historico(list(relatorio._ler(relatorio.HIST, {}).values()))
+        except Exception as e:
+            print("clima: histórico:", e, flush=True)
+    finally:
+        _trava.release()
+
+
+def atualizar_em_segundo_plano(pontos):
+    if time.time() - _ler().get("ts", 0) >= VALIDADE:
+        threading.Thread(target=atualizar, args=(pontos,), daemon=True).start()
+
+
+def _local_da_usina(codigo):
+    d = _ler()
+    us = d.get("usinas") or {}
+    if codigo in us:
+        return us[codigo]
+    k = chave_codigo(codigo)
+    return next((l for c, l in us.items() if chave_codigo(c) == k), None) if k else None
+
+
+def nivel(precip, rajada, cod):
+    """'severo' (trovoada, chuva forte, vendaval), 'chuva' (chuva/vento moderados) ou None."""
+    if (cod or 0) >= 95 or (precip or 0) >= 10 or (rajada or 0) >= 60 or cod in (65, 82):
+        return "severo"
+    if (precip or 0) >= 2 or (rajada or 0) >= 50 or (cod or 0) >= 61:
+        return "chuva"  # garoa e vento comum não contam
+    return None
+
+
+def rotulo(c):
+    em, nome = TEMPO.get(c.get("codigo"), ("🌡️", "—"))
+    partes = [f"{em} {nome}"]
+    if c.get("chuva"):
+        partes.append(f"{c['chuva']:.0f} mm/h" if c["chuva"] >= 1 else f"{c['chuva']:.1f} mm/h".replace(".", ","))
+    if c.get("rajada") and c["rajada"] >= 30:
+        partes.append(f"rajada {c['rajada']:.0f} km/h")
+    if c.get("temp") is not None:
+        partes.append(f"{c['temp']:.0f}°C")
+    return " · ".join(partes)
+
+
+def tempo_em(codigo, ts, margem=3600, serie=None):
+    """O tempo na usina por volta de ts (pior hora entre ts-1h e ts+1h): chuva e rajada máximas,
+    trovoada se houve. None se não há dado (usina sem coordenada ou ts fora dos 3 dias guardados)."""
+    loc = _local_da_usina(codigo)
+    h = serie or (((_ler().get("tempo") or {}).get(loc) or {}).get("hora") if loc else None)
+    if not h or not h.get("time"):
+        return None
+    idx = [i for i, t in enumerate(h["time"]) if ts - margem - 3600 < t <= ts + margem]
+    if not idx:
+        return None
+    pega = lambda campo: [h[campo][i] for i in idx if h.get(campo) and h[campo][i] is not None]
+    chuva, rajada, cods = max(pega("precipitation") or [0]), max(pega("wind_gusts_10m") or [0]), pega("weather_code")
+    cod = max(cods, key=lambda c: (c >= 95, c >= 80, c >= 61, c)) if cods else None
+    perto = min(idx, key=lambda i: abs(h["time"][i] - ts))
+    c = {"codigo": cod, "chuva": round(chuva, 1), "rajada": round(rajada), "temp": (h.get("temperature_2m") or [None])[perto],
+         "nuvens": (h.get("cloud_cover") or [None])[perto], "irradiacao": (h.get("shortwave_radiation") or [None])[perto],
+         "ts": ts}
+    c["nivel"] = nivel(chuva, rajada, cod)
+    c["rotulo"] = rotulo(c)
+    return c
+
+
+def _em_vigor(a, agora=None):
+    agora = agora or time.time()
+    try:
+        ini = time.mktime(time.strptime(a["inicio"], "%Y-%m-%d %H:%M"))
+        fim = time.mktime(time.strptime(a["fim"], "%Y-%m-%d %H:%M"))
+    except (KeyError, TypeError, ValueError):
+        return a.get("quando") == "hoje"
+    return ini <= agora <= fim + 60
+
+
+def avisos_da_usina(codigo):
+    """Avisos do INMET em vigor agora sobre a usina (um por tipo: o mais severo)."""
+    k = chave_codigo(codigo)
+    por_tipo = {}
+    for a in _ler().get("avisos") or []:
+        if _em_vigor(a) and any(chave_codigo(u) == k for u in a["usinas"]):
+            atual = por_tipo.get(a["descricao"])
+            if not atual or GRAVIDADE.get(a["severidade"], 0) > GRAVIDADE.get(atual["severidade"], 0):
+                por_tipo[a["descricao"]] = a
+    return list(por_tipo.values())
+
+
+GRAVIDADE = {"Perigo Potencial": 1, "Perigo": 2, "Grande Perigo": 3}
+
+
+def de(o):
+    """O tempo anotado na ocorrência, ou o preenchido depois para o histórico."""
+    return o.get("clima") or (_ler().get("historico") or {}).get(o.get("chave"))
+
+
+def preencher_historico(ocorrencias, limite=40):
+    """Ocorrências antigas (do histórico) sem tempo anotado: busca a série por hora da época no arquivo
+    histórico do Open-Meteo e guarda em clima.json["historico"][chave]. Poucas consultas por vez."""
+    d = _ler()
+    feito = d.get("historico") or {}
+    falta = [o for o in ocorrencias if o.get("codigo") and o.get("chave") not in feito and not o.get("clima")
+             and time.time() - o["inicio_ts"] > 2 * 86400 and _local_da_usina(o["codigo"])]
+    if not falta:
+        return 0
+    por_local = {}
+    for o in falta:
+        por_local.setdefault(_local_da_usina(o["codigo"]), []).append(o)
+    n = 0
+    for loc, ocs in list(por_local.items())[:limite]:
+        ini = time.strftime("%Y-%m-%d", time.localtime(min(o["inicio_ts"] for o in ocs) - 86400))
+        fim = time.strftime("%Y-%m-%d", time.localtime(max(o["inicio_ts"] for o in ocs) + 86400))
+        lat, lon = loc.split(",")
+        q = urllib.parse.urlencode({"latitude": lat, "longitude": lon, "hourly": CAMPOS, "start_date": ini, "end_date": fim,
+                                    "timezone": "America/Sao_Paulo", "timeformat": "unixtime"})
+        try:
+            h = _get(HISTORICO + "?" + q).get("hourly")
+        except Exception:
+            continue
+        for o in ocs:
+            c = tempo_em(o["codigo"], o["inicio_ts"], serie=h)
+            feito[o["chave"]] = c or {}
+            n += 1
+    d = dict(_ler(), historico=feito)
+    _gravar(d)
+    return n
+
+
+def anotar(ocorrencias):
+    """Acrescenta o tempo na hora do início de cada ocorrência (e o aviso do INMET em vigor, se houver).
+    O que já foi anotado fica (o histórico guarda; o dado por hora só cobre 3 dias)."""
+    for o in ocorrencias:
+        cod = o.get("codigo")
+        if not cod:
+            continue
+        if not o.get("clima"):
+            c = tempo_em(cod, o["inicio_ts"]) or (_ler().get("historico") or {}).get(o.get("chave"))
+            if c:
+                o["clima"] = c
+        if not o.get("normalizado"):
+            av = avisos_da_usina(cod)
+            o["aviso_inmet"] = [{"descricao": a["descricao"], "severidade": a["severidade"], "cor": a["cor"],
+                                 "fim": a["fim"]} for a in av] or None
+
+
+def resumo():
+    """Para o painel: avisos ativos (sem o polígono) e quando foi atualizado."""
+    d = _ler()
+    return {"ts": d.get("ts"), "erro": d.get("erro"),
+            "avisos": [{k: v for k, v in a.items() if k != "geo"} for a in d.get("avisos") or []]}
+
+
+def mapa():
+    """Tempo atual por usina e avisos com polígono (camada do mapa)."""
+    d = _ler()
+    atual = {}
+    for cod, loc in (d.get("usinas") or {}).items():
+        a = ((d.get("tempo") or {}).get(loc) or {}).get("atual")
+        if a:
+            c = {"codigo": a.get("weather_code"), "chuva": a.get("precipitation") or 0, "rajada": a.get("wind_gusts_10m") or 0,
+                 "temp": a.get("temperature_2m"), "nuvens": a.get("cloud_cover"), "irradiacao": a.get("shortwave_radiation")}
+            c["nivel"] = nivel(c["chuva"], c["rajada"], c["codigo"])
+            c["rotulo"] = rotulo(c)
+            atual[cod] = c
+    return {"ts": d.get("ts"), "atual": atual, "avisos": d.get("avisos") or []}
+
+
+if __name__ == "__main__":
+    import sys, mapa as m
+    pts = [{"codigo": p["nome"], "lat": p["lat"], "lon": p["lon"]}
+           for p in m.ler_kmz(config.kmz())["pontos"] if p["categoria"] == "usina"]
+    atualizar(pts, forcar=True)
+    d = _ler()
+    print(len(d.get("tempo", {})), "locais;", len(d.get("avisos", [])), "avisos;", "erro:", d.get("erro"))
+    for a in d.get("avisos", []):
+        print(" ", a["quando"], a["descricao"], a["severidade"], a["inicio"], "→", a["fim"], len(a["usinas"]), "usinas:", a["usinas"][:8])
+    for cod in sys.argv[1:]:
+        print(cod, tempo_em(cod, time.time()))

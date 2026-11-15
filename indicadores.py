@@ -1,6 +1,6 @@
 # Indicadores do Centro de Operações: ocorrências (histórico de 30+ dias) e o Diário de Chamados.
 import datetime as dt, re, statistics, time
-import coletor, relatorio
+import clima, coletor, relatorio
 
 TIPOS = [  # ordem de prioridade: a primeira que casar define o tipo da ocorrência
     ("Desarme / disjuntor", re.compile(r"desarm|disjuntor|\btrip|tripou|protecao|rele|religa|52l|sobretensao|subtensao|parada")),
@@ -89,6 +89,17 @@ def calcular(dias, cliente, painel, mapa):
     tipos = {}
     for o in ocs:
         tipos[tipo_de(o)] = tipos.get(tipo_de(o), 0) + 1
+    # ocorrências × tempo na usina na hora do início (Open-Meteo)
+    faixas = {"severo": "Temporal (trovoada, chuva forte, vendaval)", "chuva": "Chuva ou vento", None: "Tempo bom", "sem": "Sem dado de tempo"}
+    por_tempo = {k: {"tempo": v, "criticas": 0, "alertas": 0} for k, v in faixas.items()}
+    usinas_chuva = {}
+    for o in ocs:
+        c = clima.de(o)
+        k = (c.get("nivel") if c else "sem") if c != {} else "sem"
+        por_tempo[k]["criticas" if o["sev"] == "critico" else "alertas"] += 1
+        if k in ("severo", "chuva"):
+            u = usinas_chuva.setdefault(o["usina"], {"usina": o["usina"], "severo": 0, "chuva": 0})
+            u[k] += 1
     por_cliente = {}
     for o in [o for o in hist.values() if o["inicio_ts"] >= inicio and de_usina(o)]:
         c = cliente_de(o)
@@ -152,6 +163,8 @@ def calcular(dias, cliente, painel, mapa):
         },
         "serie": serie, "reincidencia": reincidencia, "tempo_usina": tempo_usina,
         "tipos": sorted(({"tipo": k, "n": v} for k, v in tipos.items()), key=lambda x: -x["n"]),
+        "por_tempo": [v for v in por_tempo.values() if v["criticas"] + v["alertas"]],
+        "usinas_chuva": sorted(usinas_chuva.values(), key=lambda u: -(u["severo"] * 2 + u["chuva"]))[:10],
         "por_cliente": sorted(({"cliente": k, "n": v} for k, v in por_cliente.items()), key=lambda x: -x["n"]),
         "chamados_mes": [meses[k] for k in sorted(meses)][-6:],
         "chamados_usina": sorted(ch_usina.values(), key=lambda u: -u["total"])[:10],

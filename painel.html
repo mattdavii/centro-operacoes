@@ -202,6 +202,17 @@
   .pergunta .sim { color: var(--azul); border-color: #2b4a99; } .pergunta .nao { color: var(--verde); border-color: #1e7a4c; }
   /* manutenções e técnicos em campo */
   .tag.manut { color: #cfe3ff; background: #12306b; }
+  .tag.clima { color: #cfeaff; background: #123a52; }
+  .tag.clima.severo { color: #ffe4c4; background: #6b2d0a; }
+  .tag.inmet { color: #1a1300; background: var(--cor-inmet, #fbbf24); }
+  .faixa-clima { margin: 10px 18px 0; padding: 8px 12px; border-radius: 8px; background: #2a2200; color: #fde68a; border: 1px solid #8a6d00; font-size: 13px; }
+  .faixa-clima summary { cursor: pointer; list-style: none; display: block; line-height: 1.5; }
+  .faixa-clima summary::-webkit-details-marker { display: none; }
+  .faixa-clima .aviso-i { margin-top: 6px; padding-top: 6px; border-top: 1px dashed #5c4a00; }
+  .faixa-clima .aviso-i small { color: #d6c27a; display: block; margin-top: 2px; }
+  .faixa-clima b.com-oc { color: #ffb4b4; }
+  .clima-g { display: grid; gap: 4px; font-size: 13px; }
+  .clima-g .inmet-g { padding: 6px 8px; border-radius: 6px; border-left: 4px solid var(--cor-inmet, #fbbf24); background: #1d1a08; }
   .campo-sub { font-size: 10px; letter-spacing: 1.2px; color: var(--rotulo); font-weight: 700; margin: 2px 0 6px; }
   .campo { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; padding: 6px 2px; border-bottom: 1px solid #0f1b38; font-size: 12px; }
   .campo b { color: var(--titulo); } .campo .q { color: var(--fraco); font-size: 11px; }
@@ -343,6 +354,7 @@
 </aside>
 <div id="aviso-app"></div>
 <div id="aviso-pc"></div>
+<div id="faixa-clima"></div>
 <div class="gaveta-fundo" id="modal-fundo"></div>
 <div class="modal" id="modal-celular" hidden>
   <button class="fechar" data-fechar-modal>✕</button>
@@ -410,6 +422,12 @@
       <div class="graf-sub">Mediana, em horas, das ocorrências com normalização confirmada (COG, mensagem ou você). As mais demoradas primeiro.</div>
       <div class="corpo"><div class="hbarras" id="g-mttr"></div></div></section>
     <section class="painel"><h2>TIPOS DE FALHA</h2><div class="corpo"><div class="hbarras" id="g-tipos"></div></div></section>
+    <section class="painel"><h2>⛈️ OCORRÊNCIAS × TEMPO NA USINA</h2>
+      <div class="graf-sub">Tempo na usina por volta do início de cada ocorrência (Open-Meteo). Temporal = trovoada, chuva ≥ 10 mm/h ou rajada ≥ 60 km/h.</div>
+      <div class="corpo"><div class="legenda-g"><span><i style="background:var(--vermelho)"></i>Críticas</span><span><i style="background:var(--amarelo)"></i>Alertas</span></div><div class="hbarras" id="g-tempo"></div></div></section>
+    <section class="painel"><h2>🌧️ USINAS QUE MAIS TÊM OCORRÊNCIA COM CHUVA</h2>
+      <div class="graf-sub">Ocorrências que começaram com temporal ou chuva na usina. Candidatas a revisar aterramento, proteção e vedação.</div>
+      <div class="corpo"><div class="legenda-g"><span><i style="background:#f97316"></i>Temporal</span><span><i style="background:#56ccff"></i>Chuva/vento</span></div><div class="hbarras" id="g-chuva"></div></div></section>
     <section class="painel"><h2>OCORRÊNCIAS POR CLIENTE</h2>
       <div class="graf-sub">Cliente pela pasta do KMZ; "sem cliente" = usina ainda sem código ligado.</div>
       <div class="corpo"><div class="hbarras" id="g-clientes"></div></div></section>
@@ -637,6 +655,37 @@ function reforcar() {
 setInterval(reforcar, 30000);
 
 /* ---------- desenho ---------- */
+/* ---------- tempo nas usinas (Open-Meteo) e avisos do INMET ---------- */
+function avisoEmVigor(a) {
+  const t = s => { const m = /^(\d{4})-(\d\d)-(\d\d) (\d\d):(\d\d)/.exec(s || ""); return m ? new Date(+m[1], m[2] - 1, +m[3], +m[4], +m[5]).getTime() / 1000 : null; };
+  const ini = t(a.inicio), fim = t(a.fim), n = agora();
+  return ini && fim ? ini <= n && n <= fim + 60 : a.quando === "hoje";
+}
+const horaAviso = s => (s || "").slice(11, 16);
+function tagsClima(o) {
+  const c = o.clima, partes = [];
+  if (c && c.nivel) partes.push(`<span class="tag clima ${c.nivel}" title="Tempo na usina por volta do início (${dhm(o.inicio_ts)}), Open-Meteo.${c.nivel === "severo" ? " Temporal na hora: causa provável do evento." : ""}">${esc(c.rotulo).toUpperCase()}</span>`);
+  if (!o.normalizado) (o.aviso_inmet || []).forEach(a => partes.push(`<span class="tag inmet" style="--cor-inmet:${esc(a.cor || "#fbbf24")}" title="Aviso do INMET em vigor sobre a usina (${esc(a.severidade)}), até ${esc(horaAviso(a.fim))}">⚠️ INMET: ${esc(a.descricao).toUpperCase()}</span>`));
+  return partes.join("");
+}
+function desenharFaixaClima(d) {
+  const av = ((d.clima || {}).avisos || []).filter(avisoEmVigor);
+  if (!av.length) { $("faixa-clima").innerHTML = ""; return; }
+  const abertas = d.ocorrencias.filter(o => !o.normalizado && !o.generico && o.codigo);
+  const chave = c => { const m = /^([A-Z]{2,4})(\d)/.exec(String(c || "").split("/")[0]); return m ? m[1] + m[2] : c; };
+  const linhas = av.map(a => {
+    const ks = new Set(a.usinas.map(chave));
+    const comOc = abertas.filter(o => ks.has(chave(o.codigo)));
+    return { a, comOc };
+  }).sort((x, y) => y.comOc.length - x.comOc.length);
+  const total = new Set(av.flatMap(a => a.usinas)).size;
+  const aberto = $("faixa-clima").querySelector("details")?.open;
+  $("faixa-clima").innerHTML = `<details class="faixa-clima"${aberto ? " open" : ""}><summary>⚠️ <b>INMET</b> ${linhas.map(({ a }) => `${esc(a.descricao)} <small>(${esc(a.severidade)}, até ${esc(horaAviso(a.fim))})</small>`).join(" · ")}
+      <span>— ${total} usina${total > 1 ? "s" : ""} na área${linhas.some(l => l.comOc.length) ? `, com ocorrência aberta: <b class="com-oc">${[...new Set(linhas.flatMap(l => l.comOc.map(o => nomeUsina(o))))].map(esc).join(", ")}</b>` : ""}</span></summary>
+    ${linhas.map(({ a, comOc }) => `<div class="aviso-i"><b>${esc(a.descricao)}</b> · ${esc(a.severidade)} · ${esc(horaAviso(a.inicio))}–${esc(horaAviso(a.fim))} · ${a.usinas.length} usinas
+      <small>${esc(a.riscos)}</small><small>Usinas: ${a.usinas.map(esc).join(", ")}</small></div>`).join("")}</details>`;
+}
+
 function desenhar() {
   const d = dados; if (!d) return;
   relogio();
@@ -655,6 +704,7 @@ function desenhar() {
   if (w.lacunas) avisos.push(`O wa-app aponta ${w.lacunas} lacuna(s) no recebimento: pode haver mensagens faltando.`);
   (d.erros || []).forEach(e => avisos.push(e));
   $("avisos").innerHTML = avisos.map(a => `<div class="aviso">${esc(a)}</div>`).join("");
+  desenharFaixaClima(d);
 
   // indicadores
   const deUsina = d.ocorrencias.filter(o => !o.generico), semUsina = d.ocorrencias.filter(o => o.generico && !o.normalizado);
@@ -690,7 +740,8 @@ function desenhar() {
           <span class="sev">${o.normalizado ? motivoBaixa(o) : o.sev === "critico" ? "CRÍTICA" : "ALERTA"}</span>
           ${o.era_critica && !o.normalizado ? `<span class="tag" title="Começou como crítica; os avisos mais recentes são só de alerta">ERA CRÍTICA</span>` : ""}
           ${o.qtd > 1 ? `<span class="tag">${o.qtd} AVISOS</span>` : ""}${o.ciente ? `<span class="tag">CIENTE</span>` : ""}
-          ${o.durante_manutencao ? `<span class="tag manut" title="Começou com uma manutenção em andamento na usina">🔧 DURANTE MANUTENÇÃO: ${esc(o.durante_manutencao.descricao).toUpperCase()}</span>` : ""}</div>
+          ${o.durante_manutencao ? `<span class="tag manut" title="Começou com uma manutenção em andamento na usina">🔧 DURANTE MANUTENÇÃO: ${esc(o.durante_manutencao.descricao).toUpperCase()}</span>` : ""}
+          ${tagsClima(o)}</div>
         <div class="texto">${esc(o.msg.texto)}</div>
         <div class="quem">${esc(o.msg.de)} · ${hm(o.msg.ts || o.inicio_ts)} · <span title="${esc(o.grupos.join("\n"))}">${esc(o.grupos.length > 1 ? o.grupos[0] + " +" + (o.grupos.length - 1) : o.grupos[0])}</span></div>
         ${o.normalizado ? `<div class="norm">✔ ${hm(o.normalizado.ts)} ${esc(o.normalizado.de)}: ${esc(o.normalizado.texto.slice(0, 140))}</div>` : ""}
@@ -999,9 +1050,12 @@ async function abrirMapa() {
     ]).addTo(mapa);
     const satelite = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
       { maxZoom: 19, attribution: "Imagens © Esri" });
-    camadas = { usinas: L.layerGroup().addTo(mapa), tecnicos: L.layerGroup().addTo(mapa), bases: L.layerGroup().addTo(mapa), clusters: L.layerGroup() };
+    camadas = { usinas: L.layerGroup().addTo(mapa), tecnicos: L.layerGroup().addTo(mapa), bases: L.layerGroup().addTo(mapa), clusters: L.layerGroup(),
+                inmet: L.layerGroup().addTo(mapa), tempo: L.layerGroup().addTo(mapa) };
     L.control.layers({ "Mapa escuro": escuro, "Satélite": satelite },
-      { "Usinas": camadas.usinas, "Técnicos": camadas.tecnicos, "Bases": camadas.bases, "Clusters": camadas.clusters }, { collapsed: true }).addTo(mapa);
+      { "Usinas": camadas.usinas, "Técnicos": camadas.tecnicos, "Bases": camadas.bases, "Clusters": camadas.clusters,
+        "Avisos do INMET": camadas.inmet, "Chuva e temporal agora": camadas.tempo }, { collapsed: true }).addTo(mapa);
+    setInterval(desenharClimaMapa, 30 * 60000);
   }
   if (!kmz) {
     try {
@@ -1012,6 +1066,27 @@ async function abrirMapa() {
   }
   setTimeout(() => mapa.invalidateSize(), 50);
   desenharMapa(true);
+  desenharClimaMapa();
+}
+async function desenharClimaMapa() {
+  if (!mapa || !kmz) return;
+  let c;
+  try { c = await (await fetch(BASE + "/api/clima", { headers: cabecalhos() })).json(); } catch { return; }
+  camadas.inmet.clearLayers(); camadas.tempo.clearLayers();
+  (c.avisos || []).filter(avisoEmVigor).forEach(a => {
+    const anel = g => g.type === "Polygon" ? [g.coordinates] : g.type === "MultiPolygon" ? g.coordinates : [];
+    anel(a.geo || {}).forEach(p => L.polygon(p.map(r => r.map(([lon, lat]) => [lat, lon])),
+      { color: a.cor || "#fbbf24", weight: 1, fillOpacity: .07, interactive: false }).addTo(camadas.inmet));
+  });
+  const pontos = Object.fromEntries(kmz.pontos.filter(p => p.categoria === "usina").map(p => [p.nome, p]));
+  const vistos = new Set();
+  Object.entries(c.atual || {}).forEach(([cod, t]) => {
+    const p = pontos[cod]; if (!p || !t.nivel) return;
+    const k = p.lat.toFixed(2) + "," + p.lon.toFixed(2); if (vistos.has(k)) return; vistos.add(k);
+    const em = t.codigo >= 95 ? "⛈️" : t.nivel === "severo" ? "🌧️" : "🌦️";
+    L.marker([p.lat, p.lon], { icon: L.divIcon({ className: "", html: `<div style="font-size:${t.nivel === "severo" ? 20 : 15}px;transform:translate(-18px,-20px);filter:drop-shadow(0 0 2px #000)">${em}</div>`, iconSize: [20, 20] }) })
+      .bindTooltip(`<b>${esc(cod)}</b>: ${esc(t.rotulo)}`, { direction: "top" }).addTo(camadas.tempo);
+  });
 }
 function desenharMapa(enquadrar) {
   if (!mapa || !kmz || !dados || !dados.pronto) return;
@@ -1146,6 +1221,11 @@ function desenharDetalhe(o, mensagens) {
     <div class="meta-g"><span class="sev" style="--cor:${cor}">${nivel}</span>${o.codigo ? `<span class="tag">${esc(o.codigo)}</span>` : ""}
       <span class="mono">${dhm(o.inicio_ts)}${norm ? " → " + dhm(norm.ts) : ""}</span><span>· ${duracao}</span>${o.qtd > 1 ? `<span>· ${o.qtd} avisos</span>` : ""}${o.ciente ? `<span class="tag">CIENTE</span>` : ""}</div>
     <div class="meta-g" style="margin-top:4px">${esc((o.grupos || []).join(" · "))}</div>
+    ${o.clima || (o.aviso_inmet || []).length ? `<div class="clima-g" style="margin-top:8px">
+      ${o.clima ? `<div>🌡️ <b>Tempo na usina no início</b> (${hm(o.inicio_ts)}): ${esc(o.clima.rotulo)}${o.clima.nuvens != null ? ` · ${o.clima.nuvens}% de nuvens` : ""}${o.clima.irradiacao != null ? ` · ${Math.round(o.clima.irradiacao)} W/m²` : ""}
+        ${o.clima.nivel === "severo" ? `<div style="color:#fdba74">⛈️ Temporal na região na hora do evento: causa provável (oscilação ou descarga na rede).</div>` : ""}</div>` : ""}
+      ${(o.aviso_inmet || []).map(a => `<div class="inmet-g" style="--cor-inmet:${esc(a.cor || "#fbbf24")}">⚠️ <b>INMET: ${esc(a.descricao)}</b> (${esc(a.severidade)}) em vigor na usina até ${esc(horaAviso(a.fim))}</div>`).join("")}
+    </div>` : ""}
     <div class="botoes">
       ${!norm && !o.ciente ? `<button data-det="ciente">CIENTE</button>` : ""}
       ${o.confirmar ? `<button data-det="acompanhar" title="Sem novidades há ${dur(agora() - o.confirmar.desde)}: segue aberta, pergunta de novo em 6 h">⏸ CONTINUAR ACOMPANHANDO</button>` : ""}
@@ -1401,6 +1481,8 @@ function desenharIndicadores(d) {
     u => (u.mediana_h < 1 ? Math.round(u.mediana_h * 60) + "min" : u.mediana_h.toLocaleString("pt-BR") + "h"), "Nenhuma normalização confirmada no período.");
   barrasH("g-tipos", d.tipos, t => t.tipo, [{ campo: "n", nome: "Ocorrências", cor: AZUL_SERIE }]);
   barrasH("g-clientes", d.por_cliente, c => c.cliente, [{ campo: "n", nome: "Ocorrências", cor: AZUL_SERIE }]);
+  barrasH("g-tempo", d.por_tempo || [], t => t.tempo, [{ campo: "criticas", nome: "Críticas", cor: "var(--vermelho)" }, { campo: "alertas", nome: "Alertas", cor: "var(--amarelo)" }], null, "Sem dado de tempo no período.");
+  barrasH("g-chuva", d.usinas_chuva || [], u => u.usina, [{ campo: "severo", nome: "Temporal", cor: "#f97316" }, { campo: "chuva", nome: "Chuva/vento", cor: "#56ccff" }], null, "Nenhuma ocorrência com chuva no período.");
   colunas("g-meses", "g-meses-x", d.chamados_mes,
     [{ campo: "Resolvido", nome: "Resolvido", cor: "var(--verde)" }, { campo: "Em andamento", nome: "Em andamento", cor: "var(--amarelo)" }, { campo: "Pendente", nome: "Pendente", cor: "var(--vermelho)" }],
     i => { const [a, m] = i.mes.split("-"); return new Date(+a, +m - 1, 1).toLocaleDateString("pt-BR", { month: "short", year: "2-digit" }); },

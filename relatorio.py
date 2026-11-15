@@ -135,7 +135,8 @@ def montar(inicio_ts, fim_ts, painel, plantao=None):
         t.append("*⚠️ Ainda abertas:*")
         for o in abertas:
             t.append(f"• {o['usina']} ({'CRÍTICA' if o['sev'] == 'critico' else 'alerta'}) desde {_hora(o['inicio_ts'])}"
-                     f"{' [herdada]' if o['inicio_ts'] < inicio_ts else ''}: {o['msg']['texto'][:140]}")
+                     f"{' [herdada]' if o['inicio_ts'] < inicio_ts else ''}: {o['msg']['texto'][:140]}"
+                     + (f" [{_clima(o)['rotulo']}]" if _clima(o) and _clima(o).get("nivel") else ""))
         t.append("")
     if fechadas:
         t.append("*✅ Normalizadas no período:*")
@@ -162,6 +163,16 @@ def montar(inicio_ts, fim_ts, painel, plantao=None):
         for p in aguardando:
             t.append(f"• {p['nome']} — há {_dur(agora - p['desde_ts'])}")
         t.append("")
+    try:
+        import clima
+        av = [x for x in clima.resumo()["avisos"] if clima._em_vigor(x)]
+    except Exception:
+        av = []
+    if av:
+        t.append("*⚠️ Avisos do INMET em vigor:*")
+        for x in av:
+            t.append(f"• {x['descricao']} ({x['severidade']}, até {str(x['fim'])[11:16]}): {len(x['usinas'])} usinas na área")
+        t.append("")
     if chamados:
         t.append("*📋 Chamados abertos no período:*")
         for c in chamados:
@@ -175,7 +186,8 @@ def montar(inicio_ts, fim_ts, painel, plantao=None):
         estado = (f"normalizada {_hora(fim['ts'])}" + {"manual": " (no painel)", "inatividade": " (por inatividade)"}.get(fim.get("motivo"), "")) if fim and fim["ts"] <= fim_ts else "ABERTA"
         dur = _dur((fim["ts"] if fim and fim["ts"] <= fim_ts else min(agora, fim_ts)) - o["inicio_ts"])
         return (f"<tr class='{o['sev']}{' aberta' if estado == 'ABERTA' else ''}'><td>{e(_hora(o['inicio_ts']))}</td><td><b>{e(o['usina'])}</b>{'<div class=q>herdada do turno anterior</div>' if o['inicio_ts'] < inicio_ts else ''}</td>"
-                f"<td>{'Crítica' if o['sev'] == 'critico' else 'Alerta'}</td><td>{e(o['msg']['texto'][:220])}<div class='q'>{e(o['msg']['de'])} · {e(' · '.join(o.get('grupos', [])))}</div></td>"
+                f"<td>{'Crítica' if o['sev'] == 'critico' else 'Alerta'}</td><td>{e(o['msg']['texto'][:220])}<div class='q'>{e(o['msg']['de'])} · {e(' · '.join(o.get('grupos', [])))}</div>"
+                f"{('<div class=q>Tempo na usina: ' + e(_clima(o)['rotulo']) + '</div>') if _clima(o) and _clima(o).get('nivel') else ''}</td>"
                 f"<td>{e(estado)}</td><td>{dur}</td></tr>")
     pagina = f"""<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Passagem de plantão {e(periodo)}</title><style>
@@ -215,6 +227,14 @@ th{{font-size:11px;text-transform:uppercase;color:#555}} tr.critico td:nth-child
 <h2 class="texto">Texto para WhatsApp / e-mail</h2><pre id="txt">{e(texto)}</pre>
 </body></html>"""
     return pagina, texto
+
+
+def _clima(o):
+    try:
+        import clima
+        return clima.de(o)
+    except Exception:
+        return None
 
 
 def linha_do_tempo(ocs, inicio, fim):

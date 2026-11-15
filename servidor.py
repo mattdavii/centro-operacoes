@@ -7,7 +7,7 @@ import hmac, http.server, ipaddress, json, mimetypes, os, re, sys, threading, ti
 
 PASTA = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, PASTA)
-import coletor, config, indicadores, mapa, relatorio  # noqa: E402
+import clima, coletor, config, indicadores, mapa, relatorio  # noqa: E402
 
 PORTA = int(os.environ.get("ATENDIMENTOS_PORTA") or config.carregar().get("porta") or 47900)
 INTERVALO = 60
@@ -114,6 +114,10 @@ def montar():
             resolvidos.append({"chave": chave, "nome": a.get("nome", chave), "tipo": a.get("tipo_chat", ""),
                                "acao": a, "previa": []})
     ocorrencias, usinas = ocorrencias_com_acoes(d, acoes)
+    try:
+        clima.anotar(ocorrencias)  # tempo na usina na hora do início + aviso do INMET em vigor
+    except Exception:
+        traceback.print_exc()
     atividades, presencas, manut_recentes = manutencoes_com_acoes(d, acoes, ocorrencias, usinas)
     abertos = lambda linhas, t: [l for l in linhas if coletor.aberto(l.get("status"), t)]
     # fechados mais recentemente atualizados primeiro (um chamado antigo resolvido hoje aparece em "Resolvidos hoje")
@@ -129,7 +133,7 @@ def montar():
         "ocorrencias": ocorrencias, "usinas": usinas, "boletins": d["boletins"], "feed": d["feed"], "atividade": d["atividade"],
         "plantao": ler_plantao(), "silencio": ler_silencio(),
         "atividades": atividades, "presencas": presencas, "manut_recentes": manut_recentes,
-        "perfil": perfil(),
+        "perfil": perfil(), "clima": clima.resumo(),
     }
 
 
@@ -267,9 +271,18 @@ def ocorrencias_com_acoes(d, acoes):
     return ocorrencias, usinas
 
 
+def pontos_usinas():
+    return [{"codigo": p["nome"], "lat": p["lat"], "lon": p["lon"]}
+            for p in dados_mapa().get("pontos", []) if p.get("categoria") == "usina"]
+
+
 def sincronizar_sempre():
     cache = estado["cache"]  # as conversas lidas ficam aqui; o detalhe da ocorrência mostra as mensagens delas
     while True:
+        try:
+            clima.atualizar_em_segundo_plano(pontos_usinas())  # a cada 30 min, sem segurar a sincronização
+        except Exception:
+            traceback.print_exc()
         estado["sincronizando"] = True
         try:
             dados = coletor.coletar(cache=cache, log=lambda s: print(time.strftime("%H:%M:%S"), s, flush=True))
@@ -581,6 +594,8 @@ class Pagina(http.server.BaseHTTPRequestHandler):
             if not painel.get("pronto"):
                 return self.responder(200, {"pronto": False})
             return self.responder(200, indicadores.calcular(dias, q.get("cliente", [""])[0], base, dados_mapa()))
+        if caminho == "/api/clima":
+            return self.responder(200, clima.mapa())
         if caminho == "/api/ocorrencia":
             return self.responder(*detalhe_ocorrencia(q.get("chave", [""])[0]))
         if caminho in ("/manifest.webmanifest", "/sw.js", "/icone-192.png", "/icone-512.png", "/icone.svg"):
