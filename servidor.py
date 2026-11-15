@@ -192,7 +192,7 @@ def montar():
         "ocorrencias": ocorrencias, "usinas": usinas, "boletins": d["boletins"], "feed": d["feed"], "atividade": d["atividade"],
         "plantao": ler_plantao(), "silencio": ler_silencio(),
         "atividades": atividades, "presencas": presencas, "manut_recentes": manut_recentes,
-        "perfil": perfil(), "clima": clima.resumo(),
+        "perfil": perfil(), "clima": clima.resumo(), "janela_h": coletor.JANELA_H,
     }
 
 
@@ -359,8 +359,20 @@ def ocorrencias_com_acoes(d, acoes):
         if set(h.get("ids") or []) & ids_vivos or h.get("chave_usina") in usinas_abertas:
             continue
         guardadas.append(dict(h, fora_da_janela=True))
+    # remontada com a janela maior, uma ocorrência que o histórico já fechou (inatividade, sem registro, COG...)
+    # continua fechada, a não ser que tenha chegado aviso novo depois do fechamento
+    fechadas_hist = {}
+    for h in relatorio._ler(relatorio.HIST, {}).values():
+        if h.get("normalizado"):
+            for i in h.get("ids") or []:
+                fechadas_hist[i] = h["normalizado"]
     ocorrencias = []
     for o in vivas + guardadas:
+        if not o.get("normalizado"):
+            antigas = [fechadas_hist[i] for i in o.get("ids") or [] if i in fechadas_hist]
+            ultima = max(antigas, key=lambda n: n.get("ts", 0)) if antigas else None
+            if ultima and ultima.get("ts", 0) >= o["ultima_ts"]:
+                o = dict(o, normalizado=ultima)
         herdadas = {}
         for mid in o.get("ids") or []:
             for tipo, a in por_msg.get(mid, {}).items():
@@ -498,7 +510,7 @@ def detalhe_ocorrencia(chave):
     if not o:
         o = relatorio._ler(relatorio.HIST, {}).get(chave)
     if not o:
-        return 404, {"erro": "ocorrência não encontrada (pode ter saído da janela de 24 h)"}
+        return 404, {"erro": "ocorrência não encontrada (pode ter saído da janela do painel)"}
     ini = o["inicio_ts"] - 1800
     fim = ((o.get("normalizado") or {}).get("ts") or time.time()) + 1800
     destaque = set(o.get("ids") or [o["msg"].get("id")])

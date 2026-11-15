@@ -19,6 +19,7 @@ PADRAO = {
     "silencio_inicio": 20,       # horário sem som (celular e painel)
     "silencio_fim": 7,
     "porta": 47900,
+    "janela_horas": 48,          # o painel mostra as últimas N horas (24 a 72); plantão de fim de semana/feriado
     "corrigir_codigos": {},      # sigla digitada errado pelo COG -> a certa do KMZ (ex.: {"CAD": "CAC"})
     "kmz_preferir": {},          # código repetido no KMZ -> pasta (cliente) do ponto certo (ex.: {"CAC100": "Athon"})
 }

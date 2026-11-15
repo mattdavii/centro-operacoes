@@ -9,7 +9,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import config
 
 DIAS = 3            # janela de conversas olhadas
-POR_CHAT = 400      # mensagens lidas por conversa, no máximo
+POR_CHAT = 800      # mensagens lidas por conversa, no máximo (48 h de grupo movimentado)
 def citacao():
     """Regex de "citou seu nome": nome e apelidos do config.json (sem nome configurado, só vale o @)."""
     c = config.carregar()
@@ -162,9 +162,11 @@ PENDENTE = re.compile(r"\b(para|pra|p/)\s+(religar|rearmar|restabelecer|energiza
                       r"\b(vai|vao|ira|irao)\s+(estar|ficar|continuar)\s+(desligad|parad|fora)|"
                       r"\b(continua|segue|permanece)\s+(desligad|parad|desarmad|fora)")
 USINA = re.compile(r"\bUFVs?\b|\busina", re.I)
-JANELA = 24 * 3600     # ocorrências e atividade das últimas 24 h
+# janela do painel: plantões de fim de semana e feriado duram 48–72 h (config.json, campo janela_horas)
+JANELA_H = max(24, min(72, int(config.carregar().get("janela_horas") or 48)))
+JANELA = JANELA_H * 3600     # ocorrências e atividade das últimas 48 h
 CONTEXTO_SEG = 20 * 60  # num grupo geral, mensagem sem usina vale a usina citada até 20 min antes na mesma conversa
-MONTAGEM = JANELA  # ocorrências montadas com as últimas 24 h (3 dias deixava críticas velhas abertas para sempre);
+MONTAGEM = JANELA  # ocorrências montadas com a mesma janela (3 dias deixava críticas velhas abertas para sempre);
                    # a identidade entre remontagens fica com as marcações, que guardam as mensagens (servidor.py)
 SEM_REGISTRO = 24 * 3600  # crítica sem aviso novo por esse tempo sai como "sem registro de normalização"
 INATIVIDADE = 6 * 3600  # alerta sem aviso novo por esse tempo sai sozinho (crítica de usina não: precisa de normalização)

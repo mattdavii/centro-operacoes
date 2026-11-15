@@ -25,12 +25,20 @@ def _gravar(caminho, dados):
     os.replace(tmp, caminho)
 
 
+def _janela():
+    try:
+        import coletor
+        return coletor.JANELA
+    except Exception:
+        return 48 * 3600
+
+
 def registrar(ocorrencias, codigos):
     """Junta as ocorrências da coleta atual ao histórico (a versão mais nova de cada uma vale)."""
     hist = _ler(HIST, {})
     # o que ainda está na janela da coleta (24 h) é refeito a cada vez: se o painel juntou duas ocorrências
     # (ex.: grupo e código da mesma usina), a versão separada antiga sai do histórico
-    janela = time.time() - 24 * 3600 + 600
+    janela = time.time() - _janela() + 600
     atuais = {o["chave"] for o in ocorrencias}
     hist = {k: v for k, v in hist.items() if k in atuais or v.get("inicio_ts", 0) < janela}
     for o in ocorrencias:
@@ -59,7 +67,7 @@ VISITAS = os.path.join(DADOS, "visitas.json")
 def registrar_manutencoes(atividades, presencas):
     """Guarda atividades e visitas (entrada/saída) para o relatório de plantão e os indicadores (45 dias)."""
     limite = time.time() - GUARDAR
-    janela = time.time() - 24 * 3600 + 600
+    janela = time.time() - _janela() + 600
     for arq, itens, ts in ((MANUT, atividades, "inicio_ts"), (VISITAS, presencas, "entrada_ts")):
         hist = _ler(arq, {})
         atuais = {i["chave"] for i in itens}

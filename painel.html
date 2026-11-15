@@ -404,7 +404,7 @@
   <div class="kpi" id="k-crit" style="--cor:var(--vermelho)"><div class="r">CRÍTICAS ABERTAS</div><div class="v" id="v-crit">–</div><div class="s">desarme, trip, emergencial</div></div>
   <div class="kpi" style="--cor:var(--amarelo)"><div class="r">ALERTAS ABERTOS</div><div class="v" id="v-alerta">–</div><div class="s">falha, comunicação, alarme</div></div>
   <div class="kpi" style="--cor:var(--laranja)"><div class="r">USINAS AFETADAS</div><div class="v" id="v-usinas">–</div><div class="s" id="s-usinas">de – monitoradas</div></div>
-  <div class="kpi" style="--cor:var(--verde)"><div class="r">NORMALIZADAS 24H</div><div class="v" id="v-norm">–</div><div class="s" id="s-norm">ocorrências fechadas</div></div>
+  <div class="kpi" style="--cor:var(--verde)"><div class="r">NORMALIZADAS <span class="jan">48</span>H</div><div class="v" id="v-norm">–</div><div class="s" id="s-norm">ocorrências fechadas</div></div>
   <div class="kpi" style="--cor:var(--azul)"><div class="r">AGUARDANDO VOCÊ</div><div class="v" id="v-ag">–</div><div class="s" id="s-ag">conversas</div></div>
   <div class="kpi" style="--cor:var(--roxo)"><div class="r">CHAMADOS ABERTOS</div><div class="v" id="v-ch">–</div><div class="s" id="s-ch">últimos 7 dias</div></div>
 </div>
@@ -508,7 +508,7 @@
   </section>
   <div class="coluna">
   <section class="painel">
-    <h2>OCORRÊNCIAS · 24H <span class="qtd" id="q-oc">0</span>
+    <h2><span>OCORRÊNCIAS · <span class="jan">48</span>H</span> <span class="qtd" id="q-oc">0</span>
       <span class="dir"><button class="aba sel" data-filtro="abertas">ABERTAS</button><button class="aba" data-filtro="normalizadas">NORMALIZADAS</button><button class="aba" data-filtro="todas">TODAS</button></span></h2>
     <div class="corpo alto" id="ocorrencias"></div>
   </section>
@@ -523,17 +523,17 @@
       <h2>QUADRO DE USINAS <span class="qtd" id="q-usi">0</span></h2>
       <div class="corpo medio"><div class="quadro" id="quadro"></div>
         <div class="legenda"><span><i style="background:var(--vermelho)"></i>crítica</span><span><i style="background:var(--amarelo)"></i>alerta</span>
-          <span><i style="background:var(--verde)"></i>normalizada</span><span><i style="background:#2b7a5a"></i>sem ocorrência</span><span><i style="background:var(--cinza)"></i>sem mensagens 24h</span></div></div>
+          <span><i style="background:var(--verde)"></i>normalizada</span><span><i style="background:#2b7a5a"></i>sem ocorrência</span><span><i style="background:var(--cinza)"></i>sem mensagens <span class="jan">48</span>h</span></div></div>
     </section>
     <section class="painel">
       <h2>EM CAMPO · MANUTENÇÕES <span class="qtd" id="q-campo">0</span></h2>
       <div class="corpo medio">
         <div class="campo-sub">👷 TÉCNICOS EM CAMPO AGORA</div><div id="em-campo"></div>
-        <div class="campo-sub" style="margin-top:10px">🔧 MANUTENÇÕES · 24 H</div><div id="manutencoes"></div>
+        <div class="campo-sub" style="margin-top:10px">🔧 MANUTENÇÕES · <span class="jan">48</span> H</div><div id="manutencoes"></div>
       </div>
     </section>
     <section class="painel">
-      <h2>MENSAGENS POR HORA · 24H <span class="qtd" id="q-msgs">0</span></h2>
+      <h2><span>MENSAGENS POR HORA · <span class="jan">48</span>H</span> <span class="qtd" id="q-msgs">0</span></h2>
       <div class="corpo"><div class="grafico" id="grafico"></div><div class="eixo" id="eixo"></div></div>
     </section>
   </div>
@@ -858,8 +858,10 @@ function desenharFaixaClima(d) {
       <small>${esc(a.riscos)}</small><small>Usinas: ${a.usinas.map(esc).join(", ")}</small></div>`).join("")}</details>`;
 }
 
+const JAN = () => (dados && dados.janela_h) || 48;  // janela do painel em horas (config.json, janela_horas)
 function desenhar() {
   const d = dados; if (!d) return;
+  document.querySelectorAll(".jan").forEach(e => { e.textContent = JAN(); });
   relogio();
   const avisos = [];
   if (d.erro) avisos.push(d.erro);
@@ -929,7 +931,7 @@ function desenhar() {
         ${o.normalizado ? `<button data-oc="reabrir" title="A baixa foi errada: volta a ficar aberta">REABRIR</button>` : ""}</span></div></div>`;
   };
   $("ocorrencias").innerHTML = listaOc.filter(o => filtroOc !== "abertas" || o.status !== "em_tratativa").map(cardOc).join("")
-    || `<div class="vazio">${filtroOc === "abertas" ? (emTratativa.length ? "Nenhuma ocorrência aberta fora as em tratativa. ✅" : "Nenhuma ocorrência aberta nas últimas 24 h. ✅") : "Nada aqui."}</div>`;
+    || `<div class="vazio">${filtroOc === "abertas" ? (emTratativa.length ? "Nenhuma ocorrência aberta fora as em tratativa. ✅" : `Nenhuma ocorrência aberta nas últimas ${JAN()} h. ✅`) : "Nada aqui."}</div>`;
   $("painel-tratativa").hidden = !emTratativa.length;
   $("q-trat").textContent = emTratativa.length;
   $("tratativa").innerHTML = emTratativa.map(cardOc).join("");
@@ -983,7 +985,7 @@ function desenhar() {
   const bs = d.boletins || [];
   boletimSel = Math.min(boletimSel, Math.max(0, bs.length - 1));
   $("abas-boletim").innerHTML = bs.map((b, i) => `<button class="aba ${i === boletimSel ? "sel" : ""}" data-boletim="${i}" title="${esc(b.grupo)}">${hm(b.ts)}</button>`).join("");
-  $("boletim").textContent = bs.length ? `${bs[boletimSel].grupo} · ${dhm(bs[boletimSel].ts)}\n\n${bs[boletimSel].completo}` : "Nenhum boletim nas últimas 24 h.";
+  $("boletim").textContent = bs.length ? `${bs[boletimSel].grupo} · ${dhm(bs[boletimSel].ts)}\n\n${bs[boletimSel].completo}` : `Nenhum boletim nas últimas ${JAN()} h.`;
 }
 
 let verAntigos = false;
@@ -1308,7 +1310,7 @@ function desenharMapa(enquadrar) {
     const proximos = tecnicos.map(t => ({ t, km: distanciaKm(p, t) })).sort((a, b) => a.km - b.km).slice(0, 3);
     m.bindPopup(`<b>${esc(p.nome)}</b>${nomes[p.nome] ? " · " + esc(nomes[p.nome]) : ""}<div style="color:var(--fraco)">${esc(p.grupo)}</div>
       ${o ? `<div style="margin-top:6px;color:${cor}"><b style="color:${cor}">${o.normalizado ? "NORMALIZADA" : o.sev === "critico" ? "CRÍTICA" : "ALERTA"}</b> desde ${dhm(o.inicio_ts)}</div>
-        <div>${esc(o.msg.texto.slice(0, 220))}</div><div style="color:var(--fraco)">${esc(o.msg.de)}</div>` : `<div style="margin-top:6px;color:var(--fraco)">Sem ocorrência nas últimas 24 h.</div>`}
+        <div>${esc(o.msg.texto.slice(0, 220))}</div><div style="color:var(--fraco)">${esc(o.msg.de)}</div>` : `<div style="margin-top:6px;color:var(--fraco)">Sem ocorrência nas últimas ${JAN()} h.</div>`}
       <div class="proximos"><div style="color:var(--rotulo);font-size:10px;letter-spacing:1px">TÉCNICOS MAIS PRÓXIMOS (linha reta)</div>
         ${proximos.map(x => `<div><b>${esc(x.t.nome)}</b> <small style="color:var(--fraco)">${esc(x.t.grupo)}</small><span>${Math.round(x.km)} km</span></div>`).join("")}</div>`);
     m.addTo(camadas.usinas);
@@ -1500,10 +1502,10 @@ document.addEventListener("touchstart", () => { $("dica").style.display = "none"
 function desenharLinhaDoTempo() {
   const d = dados, agoraS = agora();
   const p = d.plantao || {};
-  // no plantão: desde o início dele (até 48 h); fora do plantão: últimas 24 h
-  const ini = p.ativo ? Math.max(p.inicio_ts, agoraS - 48 * 3600) : agoraS - 24 * 3600;
+  // no plantão: desde o início dele (até 72 h, feriado); fora do plantão: a janela do painel (48 h)
+  const ini = p.ativo ? Math.max(p.inicio_ts, agoraS - 72 * 3600) : agoraS - JAN() * 3600;
   const total = agoraS - ini;
-  $("t-tl").textContent = p.ativo ? `LINHA DO TEMPO · PLANTÃO (desde ${dhm(ini)})` : "LINHA DO TEMPO · 24 H";
+  $("t-tl").textContent = p.ativo ? `LINHA DO TEMPO · PLANTÃO (desde ${dhm(ini)})` : `LINHA DO TEMPO · ${JAN()} H`;
   const ocs = (d.ocorrencias || []).filter(o => !o.generico && ((o.normalizado ? o.normalizado.ts : agoraS) >= ini))
     .sort((a, b) => a.inicio_ts - b.inicio_ts);
   $("q-tl").textContent = ocs.length;
@@ -1540,7 +1542,7 @@ document.addEventListener("click", ev => { const l = ev.target.closest("[data-tl
 function desenharCampo() {
   const d = dados, agoraS = agora();
   const emCampo = (d.presencas || []).filter(p => !p.saida_ts);
-  const atv = (d.atividades || []).filter(a => a.status === "andamento" || (a.fim_ts || a.inicio_ts) >= agoraS - 86400);
+  const atv = (d.atividades || []).filter(a => a.status === "andamento" || (a.fim_ts || a.inicio_ts) >= agoraS - JAN() * 3600);
   $("q-campo").textContent = emCampo.length + atv.filter(a => a.status === "andamento").length;
   $("em-campo").innerHTML = emCampo.map(p => `<div class="campo"><span><b>${esc(p.tecnico)}</b> <span class="q">em ${esc(p.usina)}</span></span>
       <span class="t" title="entrou ${dhm(p.entrada_ts)}">há ${dur(agoraS - p.entrada_ts)}</span></div>`).join("")
@@ -1551,7 +1553,7 @@ function desenharCampo() {
     return `<div class="campo" data-dica="${esc(a.usina + "\n" + a.descricao + "\n" + dhm(a.inicio_ts) + fim + "\n" + (a.msg ? a.msg.texto.slice(0, 160) : ""))}">
       <span><b>${esc(a.usina)}</b> <span class="st ${c}">${r}</span><br><span class="q">${esc(a.descricao)}</span></span>
       <span class="t">${hm(a.inicio_ts)}${fim}</span></div>`; }).join("")
-    || `<div class="vazio">Nenhuma manutenção registrada pelo COG nas últimas 24 h.</div>`;
+    || `<div class="vazio">Nenhuma manutenção registrada pelo COG nas últimas ${JAN()} h.</div>`;
 }
 
 /* ---------- aba MANUTENÇÕES ---------- */
@@ -1572,7 +1574,7 @@ function desenharManutencoes() {
     return `<div class="mt" data-chave-mt="${esc(a.chave)}">
       <div class="barra"></div>
       <div style="min-width:0">
-        <div class="titulo"><b>${esc(a.usina)}</b><span class="st manut-andamento">EM ANDAMENTO</span>${a.fora_da_janela ? `<span class="tag">HÁ MAIS DE 24 H</span>` : ""}</div>
+        <div class="titulo"><b>${esc(a.usina)}</b><span class="st manut-andamento">EM ANDAMENTO</span>${a.fora_da_janela ? `<span class="tag">HÁ MAIS DE ${JAN()} H</span>` : ""}</div>
         <div class="desc">🔧 ${esc(a.descricao)}</div>
         <div class="q">desde ${dhm(a.inicio_ts)} · ${esc((a.grupos || []).join(" · "))}</div>
         ${tecs.length ? `<div class="q">👷 em campo: ${esc(tecs.join(", "))}</div>` : ""}
