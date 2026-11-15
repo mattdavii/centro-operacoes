@@ -1216,7 +1216,8 @@ function mudarVista(v) {
   if (v === "mapa") abrirMapa();
   if (v === "indicadores") carregarIndicadores();
 }
-const chaveCodigo = c => { const m = /^([A-Z]{2,4})(\d)/.exec(c || ""); return m ? m[1] + m[2] : c; };  // CAR101 e CAR100 → CAR1
+// CAR101 e CAR100 → CAR1; "CAC100 (Blackout)" (código repetido no KMZ, renomeado) não é código e fica como está
+const chaveCodigo = c => { const m = /^([A-Z]{2,4})(\d)\d*(?:\/|$)/.exec(c || ""); return m ? m[1] + m[2] : c; };
 // ponto do KMZ de um código: o da mesma série (CAR101 → CAR100) ou, se não houver, o único da mesma sigla (CAC200 → CAC100)
 function pontoUsina(cod) {
   if (!kmz || !cod) return null;

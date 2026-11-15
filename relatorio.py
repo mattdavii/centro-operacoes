@@ -52,6 +52,7 @@ def registrar(ocorrencias, codigos):
     limite = time.time() - GUARDAR
     hist = {k: v for k, v in hist.items() if v.get("ultima_ts", 0) >= limite}
     _gravar(HIST, hist)
+    codigos = {k: v for k, v in (codigos or {}).items() if not NAO_E_NOME.search(str(v))}
     if codigos:
         atuais = _ler(CODIGOS, {})
         if any(atuais.get(k) != v for k, v in codigos.items()):
@@ -83,8 +84,12 @@ def manutencoes_periodo(inicio_ts, fim_ts):
     return sorted(atv, key=lambda a: a["inicio_ts"]), sorted(vis, key=lambda v: v["entrada_ts"])
 
 
+# o que vem depois do código no boletim "Status Operacional" não é nome de usina ("UFV DCS100 – Em geração / ...")
+NAO_E_NOME = re.compile(r"^(em gera|todos os inversores|inversores|usina (em|desarmada|sem)|sem comunica|parad)|\s/\s", re.I)
+
+
 def codigos():
-    return _ler(CODIGOS, {})
+    return {k: v for k, v in _ler(CODIGOS, {}).items() if not NAO_E_NOME.search(str(v))}
 
 
 def historico(inicio_ts, fim_ts):

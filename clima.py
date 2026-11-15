@@ -14,6 +14,7 @@ UFS = {"AC": "Acre", "AL": "Alagoas", "AP": "Amapá", "AM": "Amazonas", "BA": "B
        "MG": "Minas Gerais", "PA": "Pará", "PB": "Paraíba", "PR": "Paraná", "PE": "Pernambuco", "PI": "Piauí",
        "RJ": "Rio de Janeiro", "RN": "Rio Grande do Norte", "RS": "Rio Grande do Sul", "RO": "Rondônia", "RR": "Roraima",
        "SC": "Santa Catarina", "SP": "São Paulo", "SE": "Sergipe", "TO": "Tocantins"}
+_rotulo_cidade = {}  # "cidade:Mucuge|BA" → "Mucugê" (como foi escrito), para mostrar
 _apelidos = {}    # cidade usada para um código fora do KMZ: {"cidade:Coroados": {"CAD200"}}
 _pendentes = {}   # usina fora do KMZ esperando a coordenada da cidade: {chave: (cidade, uf)}
 INMET = "https://apiprevmet3.inmet.gov.br/avisos/ativos"
@@ -158,23 +159,84 @@ def atualizar_em_segundo_plano(pontos):
         threading.Thread(target=atualizar, args=(pontos,), daemon=True).start()
 
 
+def _sa(t):
+    import unicodedata
+    return "".join(c for c in unicodedata.normalize("NFD", str(t or "").lower()) if unicodedata.category(c) != "Mn")
+
+
+def _bate_abreviado(nome, achado):
+    """"S. LUIS M. BELOS" bate com "São Luís de Montes Belos": palavra inteira tem de estar lá, "S." é uma
+    palavra começada por s, na mesma ordem."""
+    import re
+    alvo = [w for w in re.findall(r"[a-z]+", _sa(achado)) if w not in ("de", "da", "do", "das", "dos")]
+    i = 0
+    for tok in re.findall(r"[a-z]+\.?", _sa(nome)):
+        abrev = tok.endswith(".")
+        tok = tok.rstrip(".")
+        while i < len(alvo) and not (alvo[i].startswith(tok) if abrev else alvo[i] == tok):
+            i += 1
+        if i >= len(alvo):
+            return False
+        i += 1
+    return True
+
+
 def _geocodificar(cidade, uf, pontos):
     """Coordenada da cidade (Open-Meteo, só o nome da cidade sai do PC). Sem UF, aceita só a cidade mais perto
-    das usinas do KMZ (evita o homônimo do outro lado do país). None se não achar."""
+    das usinas do KMZ (evita o homônimo do outro lado do país). Nome abreviado ("S. LUIS M. BELOS") busca pela
+    palavra mais longa e confere as iniciais. Achando, usa o ponto do KMZ a até ~25 km (a própria usina). None se não achar."""
+    import re
+    abreviado = bool(re.search(r"\b\w{1,3}\.", cidade))
+    busca = cidade
+    if abreviado:
+        # "S. LUIS M. BELOS" → busca "São Luis" (até a primeira abreviação desconhecida) e confere as iniciais
+        exp = {"s.": "São", "sta.": "Santa", "sto.": "Santo", "sr.": "Senhor", "sra.": "Senhora", "n.": "Nova"}
+        partes = []
+        for tok in cidade.split():
+            t = _sa(tok)
+            if t.endswith("."):
+                if t in exp:
+                    partes.append(exp[t])
+                    continue
+                break
+            partes.append(tok)
+        busca = " ".join(partes) or cidade
     try:
-        r = _get(GEOCODIFICAR + "?" + urllib.parse.urlencode({"name": cidade, "count": 10, "language": "pt", "countryCode": "BR"}))
+        r = _get(GEOCODIFICAR + "?" + urllib.parse.urlencode({"name": busca, "count": 100, "language": "pt", "countryCode": "BR"}))
     except Exception:
         return None
     res = [x for x in r.get("results") or [] if x.get("feature_code", "").startswith("PPL")]
+    if abreviado:
+        res = [x for x in res if _bate_abreviado(cidade, x.get("name"))]
+    else:
+        # nome exato, ou o começo do nome ("Senador Eloi" → "Senador Elói de Souza"): nada de "parecido"
+        exatos = [x for x in res if _sa(x.get("name")) == _sa(cidade)]
+        res = exatos or [x for x in res if _sa(x.get("name")).startswith(_sa(cidade) + " ")]  # "Resende" não é "Resende Costa"
     if uf:
         res = [x for x in res if x.get("admin1") == UFS.get(uf)]
     elif pontos:
         # sem UF: só cidades a menos de ~150 km de alguma usina do KMZ; entre elas, a maior
         perto = lambda x: min(math.hypot(x["latitude"] - p["lat"], x["longitude"] - p["lon"]) for p in pontos)
         res = [x for x in res if perto(x) <= 1.4]
+        if len({_local(x["latitude"], x["longitude"]) for x in res}) > 1:
+            # vários lugares com esse nome: vale a cidade (com população bem maior que os povoados homônimos);
+            # se não houver uma que se destaque (ex.: duas cidades de mesmo nome), desiste
+            ordem = sorted(res, key=lambda x: -(x.get("population") or 0))
+            p1, p2 = ordem[0].get("population") or 0, ordem[1].get("population") or 0
+            if not p1 or p1 < 5 * p2:
+                return None
+            res = ordem[:1]
     if not res:
         return None
     x = max(res, key=lambda x: x.get("population") or 0)
+    if pontos:
+        dist = lambda p: math.hypot(x["latitude"] - p["lat"], x["longitude"] - p["lon"])
+        perto = [p for p in pontos if dist(p) <= 0.25]
+        if perto:
+            # a usina do KMZ dessa cidade: a de sigla parecida com o nome (Resende → RES100), senão a mais perto
+            sig = _sa(cidade).replace(" ", "")[:3].upper()
+            p = next((p for p in sorted(perto, key=dist) if str(p["codigo"]).upper().startswith(sig)), None) or min(perto, key=dist)
+            return _local(p["lat"], p["lon"])
     return _local(x["latitude"], x["longitude"])
 
 
@@ -184,12 +246,20 @@ def cidade_de(o):
     if o.get("generico"):
         return None, None  # grupo geral sem usina identificada
     nome = re.sub(r"\s+Gerar\s*$", "", str(o.get("usina") or ""))
+    nome = re.sub(r"^[^-–]{2,20}\s[-–]\s(?=UFV)", "", nome)  # "ÉLIS - UFV MORRINHOS/GO"
     m = re.search(r"[-–/\s]\s*([A-Z]{2})\s*$", nome)
     uf = m.group(1) if m and m.group(1) in UFS else None
     if uf:
         nome = nome[:m.start()]
+    nome = nome.split(" / ")[0]  # "Vassouras / Corcovado"
+    if re.search(r"[a-zà-ú]", nome):
+        nome = re.sub(r"\b[A-Z]{2,4}\b", " ", nome)  # sigla no meio de nome normal: "Itaperuna IPN"
     nome = re.sub(r"\([^)]*\)|\bUFVs?\b|\b[A-Z]{2,4}\d{3}(?:/\d{3})?\b|[–—]|\b\d+\b|\b(I{1,3}|IV|V|VI)\b|\bGerar\b", " ", nome)
-    nome = " ".join(w for w in nome.replace("-", " ").replace(",", " ").split() if w != "e").strip(" .,")
+    nome = re.sub(r"\b(inversor(es)?|trafo|transformador|cabine|skid|eletrocentro|usina|projeto)\b.*$", " ", nome, flags=re.I)
+    palavras = [w for w in nome.replace("-", " ").replace(",", " ").split() if w != "e"]
+    while len(palavras) > 1 and re.fullmatch(r"[A-Z]", palavras[-1]):
+        palavras.pop()  # "Vargem Grande A", "Delmiro Gouveia C": letra da unidade
+    nome = " ".join(palavras).strip(" .,")
     return (nome, uf) if len(nome) >= 3 else (None, None)
 
 
@@ -198,7 +268,25 @@ def chave_local(o):
     cod = o.get("codigo")
     if cod and _local_da_usina(cod):
         return cod
+    import re
+    rotulo = str(o.get("usina") or "")
+    us = _ler().get("usinas") or {}
+    # código escrito no nome ("UFV Goy800", "Itaperuna IPN 100"): a usina do KMZ da mesma série
+    m = re.search(r"\b([A-Za-z]{2,4})\s?(\d{3})\b", rotulo)
+    if m and _local_da_usina(m.group(1).upper() + m.group(2)):
+        return m.group(1).upper() + m.group(2)
+    # sigla do KMZ sozinha ("UFV SGA", "Itaperuna IPN"): vale se todas as usinas dela ficam no mesmo lugar
+    for sig in re.findall(r"\b[A-Z]{3,4}\b", rotulo):
+        mesmos = {c: l for c, l in us.items() if re.fullmatch(sig + r"\d{3}", c)}
+        if mesmos and len(set(mesmos.values())) == 1:
+            return sorted(mesmos)[0]
     cidade, uf = cidade_de(o)
+    # ponto com nome no KMZ ("Vassouras", "UFV Cristalina")
+    if cidade:
+        alvo = _sa(cidade)
+        nomeado = next((c for c in us if not re.fullmatch(r"[A-Z]{2,4}\d{3}", c) and _sa(re.sub(r"^UFV\s+", "", c)) == alvo), None)
+        if nomeado:
+            return nomeado
     if cod and not cidade:
         # só o código ("UFV CAD100/CAD200"): usa o nome aprendido do COG para o código, ou de outro da mesma sigla
         import re, relatorio
@@ -209,12 +297,13 @@ def chave_local(o):
             cidade, uf = cidade_de({"usina": nome})
     if not cidade:
         return None
-    chave = "cidade:" + cidade + ("|" + uf if uf else "")
+    chave = "cidade:" + _sa(cidade).title() + ("|" + uf if uf else "")  # ITUMBIARA e Itumbiara são a mesma
+    _rotulo_cidade.setdefault(chave, cidade.title() if cidade.isupper() else cidade)
     extras = _ler().get("extras") or {}
     if chave not in extras:
         _pendentes[chave] = (cidade, uf)
         return None
-    if cod and extras[chave]:
+    if cod and extras[chave] and re.fullmatch(r"[A-Z]{2,4}\d{3}(/[A-Z]{0,4}\d{3})*", str(cod)):
         _apelidos.setdefault(chave, set()).update(x.strip() for x in str(cod).split("/"))
     return chave if extras[chave] else None
 
@@ -450,8 +539,8 @@ def painel():
             atual["nivel"] = nivel(atual["chuva"], atual["rajada"], atual["codigo"])
             atual["rotulo"] = rotulo(atual)
         p6, p24 = _pior(h, agora, agora + 6 * 3600), _pior(h, agora, agora + 24 * 3600)
-        so_codigos = [c for c in cods if not c.startswith("cidade:")]
-        rot = so_codigos or list(dict.fromkeys("📍 " + c[7:].split("|")[0] for c in cods))
+        so_codigos = [c for c in cods if not c.startswith(("cidade:", "nome:"))]
+        rot = so_codigos or list(dict.fromkeys("📍 " + _rotulo_cidade.get(c, c[7:].split("|")[0]) for c in cods if c.startswith("cidade:")))
         nome = next((nomes.get(c) for c in cods if nomes.get(c)), None)
         avisos = sorted({a2["descricao"] for a2 in d.get("avisos") or [] if _em_vigor(a2) and set(a2["usinas"]) & set(cods)})
         usinas.append({"codigos": cods, "rotulo": " · ".join(rot[:4]) + (f" +{len(rot) - 4}" if len(rot) > 4 else ""), "nome": nome,
