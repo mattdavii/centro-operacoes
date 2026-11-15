@@ -14,9 +14,10 @@ UFS = {"AC": "Acre", "AL": "Alagoas", "AP": "Amapá", "AM": "Amazonas", "BA": "B
        "MG": "Minas Gerais", "PA": "Pará", "PB": "Paraíba", "PR": "Paraná", "PE": "Pernambuco", "PI": "Piauí",
        "RJ": "Rio de Janeiro", "RN": "Rio Grande do Norte", "RS": "Rio Grande do Sul", "RO": "Rondônia", "RR": "Roraima",
        "SC": "Santa Catarina", "SP": "São Paulo", "SE": "Sergipe", "TO": "Tocantins"}
+_apelidos = {}    # cidade usada para um código fora do KMZ: {"cidade:Coroados": {"CAD200"}}
 _pendentes = {}   # usina fora do KMZ esperando a coordenada da cidade: {chave: (cidade, uf)}
 INMET = "https://apiprevmet3.inmet.gov.br/avisos/ativos"
-VALIDADE = 30 * 60          # atualiza a cada 30 min
+VALIDADE = 15 * 60          # atualiza a cada 15 min
 CAMPOS = "temperature_2m,precipitation,weather_code,wind_gusts_10m,cloud_cover,shortwave_radiation"
 _trava = threading.Lock()
 _cache = {"dados": None}
@@ -213,6 +214,8 @@ def chave_local(o):
     if chave not in extras:
         _pendentes[chave] = (cidade, uf)
         return None
+    if cod and extras[chave]:
+        _apelidos.setdefault(chave, set()).update(x.strip() for x in str(cod).split("/"))
     return chave if extras[chave] else None
 
 
@@ -382,6 +385,62 @@ def mapa():
             c["rotulo"] = rotulo(c)
             atual[cod] = c
     return {"ts": d.get("ts"), "atual": atual, "avisos": d.get("avisos") or []}
+
+
+def _pior(h, t0, t1):
+    """Pior hora da série entre t0 e t1 (trovoada > chuva forte > rajada), com o horário. None se tempo bom."""
+    melhor = None
+    for i, t in enumerate(h.get("time") or []):
+        if not (t0 < t <= t1):
+            continue
+        p, g, c = (h.get("precipitation") or [0])[i] or 0, (h.get("wind_gusts_10m") or [0])[i] or 0, (h.get("weather_code") or [0])[i] or 0
+        n = nivel(p, g, c)
+        if not n:
+            continue
+        peso = (n == "severo", c >= 95, p, g)
+        if not melhor or peso > melhor[0]:
+            x = {"codigo": c, "chuva": round(p, 1), "rajada": round(g), "temp": (h.get("temperature_2m") or [None])[i], "quando": t, "nivel": n}
+            x["rotulo"] = rotulo(x)
+            melhor = (peso, x)
+    return melhor[1] if melhor else None
+
+
+def painel():
+    """Aba CLIMA: avisos do INMET (hoje e próximos) e, por local, o tempo agora e o pior das próximas 6 h e 24 h."""
+    d = _ler()
+    try:
+        import relatorio
+        nomes = relatorio.codigos()
+    except Exception:
+        nomes = {}
+    por_local = {}
+    for cod, loc in sorted((d.get("usinas") or {}).items()):
+        por_local.setdefault(loc, []).append(cod)
+    for chave, loc in (d.get("extras") or {}).items():
+        if loc:
+            por_local.setdefault(loc, []).extend(sorted(_apelidos.get(chave, ())) or [chave])
+    agora = time.time()
+    usinas = []
+    for loc, cods in por_local.items():
+        t = (d.get("tempo") or {}).get(loc) or {}
+        h = t.get("hora") or {}
+        a = t.get("atual") or {}
+        atual = None
+        if a:
+            atual = {"codigo": a.get("weather_code"), "chuva": a.get("precipitation") or 0, "rajada": round(a.get("wind_gusts_10m") or 0),
+                     "temp": a.get("temperature_2m"), "nuvens": a.get("cloud_cover")}
+            atual["nivel"] = nivel(atual["chuva"], atual["rajada"], atual["codigo"])
+            atual["rotulo"] = rotulo(atual)
+        p6, p24 = _pior(h, agora, agora + 6 * 3600), _pior(h, agora, agora + 24 * 3600)
+        so_codigos = [c for c in cods if not c.startswith("cidade:")]
+        rot = so_codigos or list(dict.fromkeys("📍 " + c[7:].split("|")[0] for c in cods))
+        nome = next((nomes.get(c) for c in cods if nomes.get(c)), None)
+        avisos = sorted({a2["descricao"] for a2 in d.get("avisos") or [] if _em_vigor(a2) and set(a2["usinas"]) & set(cods)})
+        usinas.append({"codigos": cods, "rotulo": " · ".join(rot[:4]) + (f" +{len(rot) - 4}" if len(rot) > 4 else ""), "nome": nome,
+                       "local": loc, "atual": atual, "prox6": p6, "prox24": p24, "avisos": avisos})
+    avisos = sorted([dict({k: v for k, v in a.items() if k != "geo"}, em_vigor=_em_vigor(a)) for a in d.get("avisos") or []],
+                    key=lambda a: (not a["em_vigor"], a.get("inicio") or "", -GRAVIDADE.get(a.get("severidade"), 0)))
+    return {"ts": d.get("ts"), "proxima": (d.get("ts") or agora) + VALIDADE, "erro": d.get("erro"), "avisos": avisos, "usinas": usinas}
 
 
 if __name__ == "__main__":

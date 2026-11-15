@@ -596,6 +596,8 @@ class Pagina(http.server.BaseHTTPRequestHandler):
             return self.responder(200, indicadores.calcular(dias, q.get("cliente", [""])[0], base, dados_mapa()))
         if caminho == "/api/clima":
             return self.responder(200, clima.mapa())
+        if caminho == "/api/clima/painel":
+            return self.responder(200, clima.painel())
         if caminho == "/api/ocorrencia":
             return self.responder(*detalhe_ocorrencia(q.get("chave", [""])[0]))
         if caminho in ("/manifest.webmanifest", "/sw.js", "/icone-192.png", "/icone-512.png", "/icone.svg"):

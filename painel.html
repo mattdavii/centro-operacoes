@@ -205,6 +205,19 @@
   .tag.clima { color: #cfeaff; background: #123a52; }
   .tag.clima.severo { color: #ffe4c4; background: #6b2d0a; }
   .tag.inmet { color: #1a1300; background: var(--cor-inmet, #fbbf24); }
+  .cl-aviso { border-left: 4px solid var(--cor-inmet, #fbbf24); background: #15130a; border-radius: 8px; padding: 9px 12px; margin-bottom: 8px; }
+  .cl-aviso.futuro { opacity: .75; background: #11131a; }
+  .cl-aviso .t { display: flex; gap: 8px; flex-wrap: wrap; align-items: baseline; }
+  .cl-aviso .t b { font-size: 15px; } .cl-aviso .per { font-family: var(--mono); color: var(--fraco); font-size: 12px; }
+  .cl-aviso .riscos { color: #d6c27a; font-size: 12px; margin: 4px 0; }
+  .cl-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+  .cl-chips span { font-size: 10px; padding: 1px 6px; border-radius: 4px; background: #1b2540; color: var(--rotulo); font-family: var(--mono); }
+  .cl-chips span.com-oc { background: #5a1520; color: #ffd0d5; font-weight: 700; }
+  .cl-linha { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1.4fr); gap: 8px; padding: 6px 4px; border-bottom: 1px solid var(--linha); font-size: 13px; align-items: baseline; }
+  .cl-linha .u { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cl-linha .u small { color: var(--fraco); } .cl-linha .w.severo { color: #fdba74; font-weight: 700; } .cl-linha .w.chuva { color: #9bd6ff; }
+  .cl-linha .w small { color: var(--fraco); font-family: var(--mono); }
+  .cl-linha .oc-tag { color: #ff8a95; font-size: 10px; font-weight: 800; letter-spacing: .5px; margin-left: 4px; }
   .faixa-clima { margin: 10px 18px 0; padding: 8px 12px; border-radius: 8px; background: #2a2200; color: #fde68a; border: 1px solid #8a6d00; font-size: 13px; }
   .faixa-clima summary { cursor: pointer; list-style: none; display: block; line-height: 1.5; }
   .faixa-clima summary::-webkit-details-marker { display: none; }
@@ -343,7 +356,7 @@
       <button id="btn-teste" title="Dispara um alarme de teste no celular (em até 1 min) e aqui">🔔 Testar alarme</button>
       <button id="btn-celular" class="so-pc" title="Mostra o QR para conectar o app Android a este PC">📱 Conectar celular</button>
       <button id="btn-tela" title="Tela cheia (F)">⛶</button>
-      <span class="vistas"><button class="sel" data-vista="painel">PAINEL</button><button data-vista="mapa">MAPA</button><button data-vista="manutencoes">MANUTENÇÕES</button><button data-vista="indicadores">INDICADORES</button></span>
+      <span class="vistas"><button class="sel" data-vista="painel">PAINEL</button><button data-vista="mapa">MAPA</button><button data-vista="manutencoes">MANUTENÇÕES</button><button data-vista="clima" id="aba-clima">CLIMA</button><button data-vista="indicadores">INDICADORES</button></span>
     </div>
   </div>
 </header>
@@ -397,6 +410,28 @@
     <section class="painel largo"><h2>🔧 USINAS EM MANUTENÇÃO <span class="qtd" id="q-mt-and">0</span></h2><div class="corpo" id="mt-lista"></div></section>
     <section class="painel"><h2>👷 TÉCNICOS EM CAMPO <span class="qtd" id="q-mt-campo">0</span></h2><div class="corpo medio" id="mt-tecnicos"></div></section>
     <section class="painel"><h2>✔ CONCLUÍDAS E CANCELADAS · 7 DIAS <span class="qtd" id="q-mt-ok">0</span></h2><div class="corpo medio" id="mt-recentes"></div></section>
+  </div>
+</section>
+<section id="vista-clima" hidden>
+  <div class="filtros">
+    <span class="vistas"><button class="sel" data-clfiltro="todas">TODAS AS USINAS</button><button data-clfiltro="ocorrencia">SÓ COM OCORRÊNCIA ABERTA</button></span>
+    <span class="nota-f" id="cl-nota">Open-Meteo (tempo por hora) e INMET (avisos oficiais) · atualiza sozinho</span>
+  </div>
+  <div class="ind-kpis">
+    <div class="kpi" style="--cor:var(--amarelo)"><div class="r">AVISOS DO INMET</div><div class="v" id="cl-avisos">–</div><div class="s" id="cl-avisos-s">em vigor agora</div></div>
+    <div class="kpi" style="--cor:#f97316"><div class="r">USINAS NA ÁREA DE AVISO</div><div class="v" id="cl-area">–</div><div class="s" id="cl-area-s">–</div></div>
+    <div class="kpi" style="--cor:#56ccff"><div class="r">CHUVA OU VENTO AGORA</div><div class="v" id="cl-agora">–</div><div class="s" id="cl-agora-s">locais com usinas</div></div>
+    <div class="kpi" style="--cor:var(--vermelho)"><div class="r">TEMPORAL NAS PRÓXIMAS 6 H</div><div class="v" id="cl-6h">–</div><div class="s" id="cl-6h-s">–</div></div>
+    <div class="kpi" style="--cor:var(--verde)"><div class="r">ATUALIZADO</div><div class="v" id="cl-ts">–</div><div class="s" id="cl-ts-s">–</div></div>
+  </div>
+  <div class="ind-grade">
+    <section class="painel largo"><h2>⚠️ AVISOS DO INMET SOBRE AS USINAS <span class="qtd" id="q-cl-avisos">0</span></h2><div class="corpo" id="cl-lista-avisos"></div></section>
+    <section class="painel"><h2>🌧️ AGORA NAS USINAS <span class="qtd" id="q-cl-agora">0</span></h2>
+      <div class="graf-sub">Última hora medida. Temporal = trovoada, chuva ≥ 10 mm/h ou rajada ≥ 60 km/h.</div><div class="corpo medio" id="cl-lista-agora"></div></section>
+    <section class="painel"><h2>🔮 PRÓXIMAS 6 H <span class="qtd" id="q-cl-6h">0</span></h2>
+      <div class="graf-sub">Pior hora prevista em cada local, para decidir quando mandar o técnico.</div><div class="corpo medio" id="cl-lista-6h"></div></section>
+    <section class="painel largo"><h2>📅 PRÓXIMAS 24 H · TEMPORAL PREVISTO <span class="qtd" id="q-cl-24h">0</span></h2>
+      <div class="graf-sub" id="cl-24h-s"></div><div class="corpo" id="cl-lista-24h"></div></section>
   </div>
 </section>
 <section id="vista-indicadores" hidden>
@@ -671,8 +706,82 @@ function tagsClima(o) {
   if (!o.normalizado) (o.aviso_inmet || []).forEach(a => partes.push(`<span class="tag inmet" style="--cor-inmet:${esc(a.cor || "#fbbf24")}" title="Aviso do INMET em vigor sobre a usina (${esc(a.severidade)}), até ${esc(horaAviso(a.fim))}">⚠️ INMET: ${esc(a.descricao).toUpperCase()}</span>`));
   return partes.join("");
 }
+let climaPainel = null, clFiltro = "todas";
+async function carregarClima() {
+  try { climaPainel = await (await fetch(BASE + "/api/clima/painel", { headers: cabecalhos() })).json(); } catch { return; }
+  desenharClima();
+}
+setInterval(() => { if (vista === "clima") carregarClima(); }, 2 * 60000);
+function desenharClima() {
+  const c = climaPainel; if (!c) return;
+  const abertas = ((dados || {}).ocorrencias || []).filter(o => !o.normalizado && !o.generico);
+  const codOc = new Set(abertas.filter(o => o.codigo).flatMap(o => o.codigo.split("/").map(x => chaveCodigo(x.trim()))));
+  const temOc = cods => cods.some(x => codOc.has(chaveCodigo(x)));
+  const nomeOc = cods => { const o = abertas.find(o => o.codigo && o.codigo.split("/").some(x => cods.some(y => chaveCodigo(y) === chaveCodigo(x.trim())))); return o ? (o.sev === "critico" ? "CRÍTICA" : "ALERTA") : ""; };
+  let us = c.usinas;
+  if (clFiltro === "ocorrencia") us = us.filter(u => temOc(u.codigos));
+  const emVigor = c.avisos.filter(a => a.em_vigor);
+  const naArea = new Set(emVigor.flatMap(a => a.usinas));
+  const agoraL = us.filter(u => u.atual && u.atual.nivel).sort((a, b) => (b.atual.nivel === "severo") - (a.atual.nivel === "severo") || b.atual.chuva - a.atual.chuva);
+  const p6 = us.filter(u => u.prox6).sort((a, b) => (b.prox6.nivel === "severo") - (a.prox6.nivel === "severo") || a.prox6.quando - b.prox6.quando);
+  const p24 = us.filter(u => u.prox24 && u.prox24.nivel === "severo").sort((a, b) => a.prox24.quando - b.prox24.quando);
+  $("cl-avisos").textContent = emVigor.length;
+  $("cl-avisos-s").textContent = `em vigor agora · ${c.avisos.length - emVigor.length} para os próximos dias`;
+  $("cl-area").textContent = naArea.size;
+  $("cl-area-s").textContent = `${[...naArea].filter(x => codOc.has(chaveCodigo(x))).length} com ocorrência aberta`;
+  $("cl-agora").textContent = agoraL.length;
+  $("cl-agora-s").textContent = `${agoraL.filter(u => u.atual.nivel === "severo").length} com temporal`;
+  $("cl-6h").textContent = p6.filter(u => u.prox6.nivel === "severo").length;
+  $("cl-6h-s").textContent = `${p6.length} locais com chuva ou vento previstos`;
+  $("cl-ts").textContent = c.ts ? hm(c.ts) : "—";
+  $("cl-ts-s").textContent = c.erro ? "⚠ " + c.erro : `próxima ${hm(c.proxima)}`;
+  const chip = x => `<span class="${codOc.has(chaveCodigo(x)) ? "com-oc" : ""}" title="${codOc.has(chaveCodigo(x)) ? "com ocorrência aberta" : ""}">${esc(x.replace(/^cidade:/, "📍 ").replace("|", "-"))}</span>`;
+  const chips = cods => {
+    const ord = [...cods].sort((a, b) => codOc.has(chaveCodigo(b)) - codOc.has(chaveCodigo(a)));
+    const vis = ord.slice(0, 20), resto = ord.slice(20);
+    return `<div class="cl-chips">${vis.map(chip).join("")}</div>${resto.length ? `<details><summary style="cursor:pointer;color:var(--fraco);font-size:12px;margin-top:4px">+ ${resto.length} usinas</summary><div class="cl-chips">${resto.map(chip).join("")}</div></details>` : ""}`;
+  };
+  const avisosVis = clFiltro === "ocorrencia" ? c.avisos.filter(a => a.usinas.some(x => codOc.has(chaveCodigo(x)))) : c.avisos;
+  $("q-cl-avisos").textContent = avisosVis.length;
+  $("cl-lista-avisos").innerHTML = avisosVis.map(a => `<div class="cl-aviso ${a.em_vigor ? "" : "futuro"}" style="--cor-inmet:${esc(a.cor || "#fbbf24")}">
+      <div class="t"><b>${esc(a.descricao)}</b><span class="tag inmet" style="--cor-inmet:${esc(a.cor || "#fbbf24")}">${esc(a.severidade).toUpperCase()}</span>
+        <span class="per">${a.em_vigor ? "EM VIGOR · " : "PREVISTO · "}${esc(a.inicio)} → ${esc(String(a.fim).slice(a.inicio && a.fim && a.inicio.slice(0, 10) === a.fim.slice(0, 10) ? 11 : 0))}</span>
+        <span class="per">${a.usinas.length} usinas</span><button data-vista="mapa" style="margin-left:auto">📍 VER NO MAPA</button></div>
+      <div class="riscos">${esc(a.riscos)}</div>${chips(clFiltro === "ocorrencia" ? a.usinas.filter(x => codOc.has(chaveCodigo(x))) : a.usinas)}</div>`).join("")
+    || `<div class="vazio">Nenhum aviso do INMET sobre as usinas. ✅</div>`;
+  const linha = (u, w, quando) => `<div class="cl-linha"><div class="u"><b>${esc(u.rotulo)}</b>${u.nome ? ` <small>${esc(u.nome)}</small>` : ""}${temOc(u.codigos) ? `<span class="oc-tag">● ${nomeOc(u.codigos)}</span>` : ""}</div>
+      <div class="w ${w.nivel}">${quando ? `<small>${hm(w.quando)}</small> ` : ""}${esc(w.rotulo)}${u.avisos.length ? ` <small>· INMET: ${esc(u.avisos.join(", "))}</small>` : ""}</div></div>`;
+  $("q-cl-agora").textContent = agoraL.length;
+  $("cl-lista-agora").innerHTML = agoraL.map(u => linha(u, u.atual)).join("") || `<div class="vazio">Sem chuva nem vento forte nas usinas agora. ☀️</div>`;
+  $("q-cl-6h").textContent = p6.length;
+  $("cl-lista-6h").innerHTML = p6.map(u => linha(u, u.prox6, true)).join("") || `<div class="vazio">Nada previsto para as próximas 6 h.</div>`;
+  $("q-cl-24h").textContent = p24.length;
+  $("cl-24h-s").textContent = `Locais com trovoada, chuva forte ou vendaval previstos até ${hm(agora() + 86400)} (hora da pior previsão). ${us.filter(u => u.prox24 && u.prox24.nivel === "chuva").length} outros com chuva ou vento moderados.`;
+  $("cl-lista-24h").innerHTML = p24.map(u => linha(u, u.prox24, true)).join("") || `<div class="vazio">Nenhum temporal previsto nas próximas 24 h.</div>`;
+}
+document.addEventListener("click", ev => {
+  const b = ev.target.closest("[data-clfiltro]"); if (!b) return;
+  clFiltro = b.dataset.clfiltro;
+  document.querySelectorAll("[data-clfiltro]").forEach(x => x.classList.toggle("sel", x === b));
+  desenharClima();
+});
+let avisosConhecidos = null;
+function avisarNovosInmet(av) {
+  // aviso novo do INMET sobre as usinas: notificação do PC (sem som), uma vez por aviso
+  let vistos;
+  try { vistos = new Set(JSON.parse(localStorage.getItem("inmet_vistos") || "[]")); } catch { vistos = new Set(); }
+  const novos = av.filter(a => !vistos.has(String(a.id)));
+  if (avisosConhecidos !== null && novos.length && somLigado && "Notification" in window && Notification.permission === "granted")
+    novos.forEach(a => mostrarNotificacao(`⚠️ INMET: ${a.descricao} (${a.severidade})`, { body: `${a.usinas.length} usinas na área, até ${horaAviso(a.fim)}. Veja a aba CLIMA.`, tag: "inmet" + a.id, silent: true }));
+  avisosConhecidos = true;
+  novos.forEach(a => vistos.add(String(a.id)));
+  try { localStorage.setItem("inmet_vistos", JSON.stringify([...vistos].slice(-200))); } catch {}
+}
 function desenharFaixaClima(d) {
   const av = ((d.clima || {}).avisos || []).filter(avisoEmVigor);
+  $("aba-clima").innerHTML = av.length ? `CLIMA <span style="color:var(--amarelo)">⚠${av.length}</span>` : "CLIMA";
+  avisarNovosInmet(av);
+  if (vista === "clima") desenharClima();
   if (!av.length) { $("faixa-clima").innerHTML = ""; return; }
   const abertas = d.ocorrencias.filter(o => !o.normalizado && !o.generico && o.codigo);
   const chave = c => { const m = /^([A-Z]{2,4})(\d)/.exec(String(c || "").split("/")[0]); return m ? m[1] + m[2] : c; };
@@ -1032,6 +1141,8 @@ function mudarVista(v) {
   $("vista-mapa").hidden = v !== "mapa";
   $("vista-indicadores").hidden = v !== "indicadores";
   $("vista-manutencoes").hidden = v !== "manutencoes";
+  $("vista-clima").hidden = v !== "clima";
+  if (v === "clima") carregarClima();
   $("vista-painel").hidden = $("vista-aovivo").hidden = v !== "painel";
   if (v === "mapa") abrirMapa();
   if (v === "indicadores") carregarIndicadores();
