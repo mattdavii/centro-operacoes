@@ -756,6 +756,7 @@ def montar_ocorrencias(eventos, usinas, vinculos=None):
             resolvidos[citada] = alvo or "nome:" + " ".join(sorted(ass[0])) + " " + " ".join(sorted(ass[1]))
         e["chave_usina"] = resolvidos[citada]
     ocorrencias, abertas, boletins = [], {}, []
+    normalizacoes = []  # toda normalização de usina, para fechar também a ocorrência antiga (fora da janela, em tratativa)
     for e in sorted(eventos, key=lambda e: e["ts"]):
         if e["tipo"] not in ("critico", "alerta", "normal", "boletim", "acompanha"):
             continue  # atividades e entrada/saída: montar_manutencoes
@@ -786,6 +787,9 @@ def montar_ocorrencias(eventos, usinas, vinculos=None):
                 continue  # sem ocorrência aberta e sem dizer que a usina está fora: só registro
             e = dict(e, tipo="critico")
         if e["tipo"] == "normal":
+            normalizacoes.append({"chave_usina": k, "codigo": e.get("codigo"), "ts": e["ts"], "id": e["id"], "jid": e["jid"],
+                                  "msg": dict(e["msg"], grupo=e["grupo"], motivo=e.get("motivo") or "mensagem"),
+                                  "so_comunicacao": e.get("so_comunicacao"), "so_inversor": e.get("so_inversor")})
             if o and not o["normalizado"] and e.get("so_inversor") and o["niveis"] and o["niveis"][-1][1] == "critico":
                 continue  # um inversor voltou, mas a usina desarmada não foi dada como religada
             if o and not o["normalizado"] and o["sev"] == "critico" and e.get("so_comunicacao"):
@@ -854,6 +858,7 @@ def montar_ocorrencias(eventos, usinas, vinculos=None):
         u["abertas"] = len(abertas_u)
         u.pop("ocorrencias", None)
         u.pop("assinatura", None)
+    montar_ocorrencias.normalizacoes = normalizacoes
     return ocorrencias, todas, boletins
 
 
@@ -1041,6 +1046,7 @@ def coletar(cache=None, dias=DIAS, log=print):
         + (f", {len(erros)} erro(s)" if erros else ""))
     return {"quando": int(time.time()), "whatsapp": status(), "pendentes": pendentes,
             "ocorrencias": ocorrencias[:120], "usinas": usinas, "boletins": boletins[:6], "codigos": codigos,
+            "normalizacoes": getattr(montar_ocorrencias, "normalizacoes", [])[-300:],
             "atividades": atividades[:80], "presencas": presencas[:120], "feed": feed[:60], "atividade": atividade,
             "chamados": chamados, "tarefas": tarefas, "erros": erros}
 

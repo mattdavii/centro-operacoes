@@ -339,6 +339,40 @@ def aplicar_status(ocorrencias, presencas, acoes, usinas):
                 o.pop("confirmar", None)  # ficou para depois: pergunta só depois de 24 h
 
 
+def _mesma_usina_oc(a, b):
+    if a.get("chave_usina") and a.get("chave_usina") == b.get("chave_usina"):
+        return True
+    ca, cb = coletor.chave_codigo(a.get("codigo")), coletor.chave_codigo(b.get("codigo"))
+    return bool(ca and ca == cb)
+
+
+def normalizacao_posterior(h, d, vivas):
+    """Ocorrência antiga ainda aberta (fora da janela, em tratativa): a usina foi normalizada depois do último aviso
+    dela? Vale a mensagem de normalização da usina ou uma ocorrência nova da mesma usina que já foi normalizada,
+    com as mesmas proteções de sempre (volta de comunicação ou de um inversor não fecha usina desarmada)."""
+    critica = h.get("sev") == "critico"
+    sobre = coletor.sem_acento((h.get("msg") or {}).get("texto") or "")
+    de_comunicacao, de_inversor = bool(coletor.SO_COMUNICACAO.search(sobre)), "inversor" in sobre
+    candidatos = []
+    for n in d.get("normalizacoes") or []:
+        if n["ts"] <= h["ultima_ts"] or not _mesma_usina_oc(h, n):
+            continue
+        # "comunicação restabelecida" só fecha o que era de comunicação; "inversor em operação", o que era de inversor
+        if n.get("so_comunicacao") and (critica or not de_comunicacao):
+            continue
+        if n.get("so_inversor") and (critica or not de_inversor):
+            continue
+        candidatos.append(dict(n["msg"], ts=n["ts"]))
+    for o in vivas:
+        nz = o.get("normalizado")
+        if not nz or nz.get("ts", 0) <= h["ultima_ts"] or not _mesma_usina_oc(h, o):
+            continue
+        if nz.get("motivo") in ("inatividade", "sem_registro") or (critica and o.get("sev") != "critico"):
+            continue
+        candidatos.append(dict(nz, motivo=nz.get("motivo") or "mensagem"))
+    return min(candidatos, key=lambda x: x.get("ts", 0)) if candidatos else None
+
+
 def ocorrencias_com_acoes(d, acoes):
     """Aplica 'ciente' e 'encerrar' do painel. Uma ocorrência encerrada à mão volta a abrir se chegar
     aviso novo da mesma usina depois do encerramento. O estado das usinas é recalculado em seguida."""
@@ -356,8 +390,14 @@ def ocorrencias_com_acoes(d, acoes):
     for k, h in relatorio._ler(relatorio.HIST, {}).items():
         if k in chaves_vivas or h.get("normalizado") or h.get("generico") or not indicadores.de_usina(h):
             continue
-        if set(h.get("ids") or []) & ids_vivos or h.get("chave_usina") in usinas_abertas:
+        if set(h.get("ids") or []) & ids_vivos:
             continue
+        fim = normalizacao_posterior(h, d, vivas)
+        if fim:
+            guardadas.append(dict(h, normalizado=fim, fora_da_janela=True))  # resolvida depois: dá baixa (e o histórico guarda)
+            continue
+        if h.get("chave_usina") in usinas_abertas:
+            continue  # a mesma usina tem ocorrência nova aberta: aparece só ela
         guardadas.append(dict(h, fora_da_janela=True))
     # remontada com a janela maior, uma ocorrência que o histórico já fechou (inatividade, sem registro, COG...)
     # continua fechada, a não ser que tenha chegado aviso novo depois do fechamento
@@ -940,7 +980,7 @@ class Pagina(http.server.BaseHTTPRequestHandler):
                     acoes[chave] = a
                 # limpa marcações velhas (mais de 7 dias)
                 acoes = {k: v for k, v in acoes.items()
-                         if time.time() - v["ts"] < (30 if k.startswith(("st:", "enc:", "keep:")) else 7) * 86400}
+                         if time.time() - v["ts"] < (90 if k.startswith(("st:", "enc:", "keep:", "acomp:")) else 7) * 86400}
                 gravar_acoes(acoes)
                 painel = montar()
                 registrar(painel)

@@ -50,7 +50,8 @@ def registrar(ocorrencias, codigos):
               and set(v.get("ids") or []) & ids_atuais]:
         del hist[k]
     limite = time.time() - GUARDAR
-    hist = {k: v for k, v in hist.items() if v.get("ultima_ts", 0) >= limite}
+    # ocorrência ainda aberta (em tratativa há semanas) não sai do histórico por idade
+    hist = {k: v for k, v in hist.items() if v.get("ultima_ts", 0) >= limite or not v.get("normalizado")}
     _gravar(HIST, hist)
     codigos = {k: v for k, v in (codigos or {}).items() if not NAO_E_NOME.search(str(v))}
     if codigos:
