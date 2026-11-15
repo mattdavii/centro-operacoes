@@ -399,8 +399,19 @@ def dados_mapa():
     except OSError:
         return {"erro": "Sem KMZ das usinas: coloque o arquivo em " + caminho + " (ou indique o caminho em config.json, campo kmz)",
                 "pontos": [], "areas": [], "codigos": relatorio.codigos()}
-    if _mapa["mtime"] != mt:
-        _mapa["dados"], _mapa["mtime"] = mapa.ler_kmz(caminho), mt
+    preferir = config.carregar().get("kmz_preferir") or {}
+    if _mapa["mtime"] != (mt, str(preferir)):
+        d = mapa.ler_kmz(caminho)
+        # o mesmo código em duas pastas: fica com o código o ponto da pasta preferida (config.json, kmz_preferir);
+        # o outro vira "CAC100 (Blackout)" para não ser confundido
+        usinas = [p for p in d["pontos"] if p["categoria"] == "usina"]
+        for cod, pasta in preferir.items():
+            iguais = [p for p in usinas if p["nome"].upper() == cod.upper()]
+            if len(iguais) > 1:
+                for p in iguais:
+                    if p["grupo"].lower() != str(pasta).lower():
+                        p["nome"] = f"{p['nome']} ({p['grupo']})"
+        _mapa["dados"], _mapa["mtime"] = d, (mt, str(preferir))
     return dict(_mapa["dados"], codigos=relatorio.codigos())
 
 

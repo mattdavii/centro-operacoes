@@ -751,9 +751,9 @@ setInterval(() => { if (vista === "clima") carregarClima(); }, 2 * 60000);
 function desenharClima() {
   const c = climaPainel; if (!c) return;
   const abertas = ((dados || {}).ocorrencias || []).filter(o => !o.normalizado && !o.generico);
-  const codOc = new Set(abertas.filter(o => o.codigo).flatMap(o => o.codigo.split("/").map(x => chaveCodigo(x.trim()))));
+  const codOc = new Set(abertas.filter(o => o.codigo).flatMap(o => o.codigo.split("/").map(x => chaveNoMapa(x.trim()))));
   const temOc = cods => cods.some(x => codOc.has(chaveCodigo(x)));
-  const nomeOc = cods => { const o = abertas.find(o => o.codigo && o.codigo.split("/").some(x => cods.some(y => chaveCodigo(y) === chaveCodigo(x.trim())))); return o ? (o.sev === "critico" ? "CRÍTICA" : "ALERTA") : ""; };
+  const nomeOc = cods => { const o = abertas.find(o => o.codigo && o.codigo.split("/").some(x => cods.some(y => chaveCodigo(y) === chaveNoMapa(x.trim())))); return o ? (o.sev === "critico" ? "CRÍTICA" : "ALERTA") : ""; };
   let us = c.usinas;
   if (clFiltro === "ocorrencia") us = us.filter(u => temOc(u.codigos));
   const emVigor = c.avisos.filter(a => a.em_vigor);
@@ -823,7 +823,7 @@ function desenharFaixaClima(d) {
   const chave = c => { const m = /^([A-Z]{2,4})(\d)/.exec(String(c || "").split("/")[0]); return m ? m[1] + m[2] : c; };
   const linhas = av.map(a => {
     const ks = new Set(a.usinas.map(chave));
-    const comOc = abertas.filter(o => ks.has(chave(o.codigo)));
+    const comOc = abertas.filter(o => ks.has(chave(o.codigo)) || ks.has(chaveNoMapa(o.codigo)));
     return { a, comOc };
   }).sort((x, y) => y.comOc.length - x.comOc.length);
   const total = new Set(av.flatMap(a => a.usinas)).size;
@@ -1191,6 +1191,16 @@ function mudarVista(v) {
   if (v === "indicadores") carregarIndicadores();
 }
 const chaveCodigo = c => { const m = /^([A-Z]{2,4})(\d)/.exec(c || ""); return m ? m[1] + m[2] : c; };  // CAR101 e CAR100 → CAR1
+// ponto do KMZ de um código: o da mesma série (CAR101 → CAR100) ou, se não houver, o único da mesma sigla (CAC200 → CAC100)
+function pontoUsina(cod) {
+  if (!kmz || !cod) return null;
+  const c = String(cod).split("/")[0].trim(), usinas = kmz.pontos.filter(p => p.categoria === "usina");
+  const p = usinas.find(p => !/\s\(/.test(p.nome) && chaveCodigo(p.nome) === chaveCodigo(c));
+  if (p) return p;
+  const sigla = (/^[A-Z]+/.exec(c) || [""])[0], mesmos = sigla ? usinas.filter(p => new RegExp("^" + sigla + "\\d{3}$").test(p.nome)) : [];
+  return mesmos.length === 1 ? mesmos[0] : null;
+}
+const chaveNoMapa = c => { const p = pontoUsina(c); return p ? chaveCodigo(p.nome) : chaveCodigo(c); };
 function distanciaKm(a, b) {
   const r = Math.PI / 180, dLat = (b.lat - a.lat) * r, dLon = (b.lon - a.lon) * r;
   const h = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * r) * Math.cos(b.lat * r) * Math.sin(dLon / 2) ** 2;
@@ -1253,7 +1263,7 @@ function desenharMapa(enquadrar) {
   for (const o of dados.ocorrencias || []) {
     if (!o.codigo) continue;
     for (const c of o.codigo.split("/").map((x, i, a) => i && /^\d+$/.test(x) ? a[0].replace(/\d+$/, "") + x : x)) {
-      const k = chaveCodigo(c), e = o.normalizado ? "normalizado" : o.sev;
+      const k = chaveNoMapa(c), e = o.normalizado ? "normalizado" : o.sev;
       if ((peso[e] || 0) > (peso[estado[k]] || 0)) { estado[k] = e; ocPorCodigo[k] = o; }
     }
   }
@@ -1265,8 +1275,9 @@ function desenharMapa(enquadrar) {
   const cores = { critico: "#ff4d5e", alerta: "#fbbf24", normalizado: "#3ee08a" };
   const usinasKmz = kmz.pontos.filter(p => p.categoria === "usina");
   // usinas: as normais primeiro, as com problema por cima
-  usinasKmz.sort((a, b) => (peso[estado[chaveCodigo(a.nome)]] || 0) - (peso[estado[chaveCodigo(b.nome)]] || 0)).forEach(p => {
-    const k = chaveCodigo(p.nome), e = estado[k], o = ocPorCodigo[k];
+  const chaveP = p => /\s\(/.test(p.nome) ? p.nome : chaveCodigo(p.nome);  // "CAC100 (Blackout)": código repetido, não é o ponto do código
+  usinasKmz.sort((a, b) => (peso[estado[chaveP(a)]] || 0) - (peso[estado[chaveP(b)]] || 0)).forEach(p => {
+    const k = /\s\(/.test(p.nome) ? p.nome : chaveCodigo(p.nome), e = estado[k], o = ocPorCodigo[k];
     const cor = cores[e] || "#3a6ea5";
     const raio = e === "critico" ? 9 : e === "alerta" ? 7 : e ? 5 : 4;
     const m = L.circleMarker([p.lat, p.lon], { radius: raio, color: e ? "#000" : "#1b3a66", weight: 1, fillColor: cor, fillOpacity: e ? .95 : .7 });
@@ -1280,7 +1291,7 @@ function desenharMapa(enquadrar) {
     if (e === "critico") L.marker([p.lat, p.lon], { interactive: false, icon: L.divIcon({ className: "pino-pulso", iconSize: [14, 14] }) }).addTo(camadas.usinas);
     marcadores[p.nome] = m;
   });
-  const pontoDo = cod => cod && usinasKmz.find(p => chaveCodigo(p.nome) === chaveCodigo(String(cod).split("/")[0]));
+  const pontoDo = cod => pontoUsina(cod);
   (dados.atividades || []).filter(a => a.status === "andamento").forEach(a => {
     const p = pontoDo(a.codigo); if (!p) return;
     L.circleMarker([p.lat, p.lon], { radius: 14, color: "#3987e5", weight: 3, fill: false, dashArray: "4 3" })
@@ -1370,7 +1381,7 @@ function desenharDetalhe(o, mensagens) {
   // ponto no mapa e técnicos mais próximos (quando a usina tem código e o KMZ já foi carregado)
   let ponto = null, proximos = [];
   if (o.codigo && kmz) {
-    ponto = kmz.pontos.find(p => p.categoria === "usina" && chaveCodigo(p.nome) === chaveCodigo(o.codigo.split("/")[0]));
+    ponto = pontoUsina(o.codigo);
     if (ponto) proximos = kmz.pontos.filter(p => p.categoria === "tecnico").map(t => ({ t, km: distanciaKm(ponto, t) })).sort((a, b) => a.km - b.km).slice(0, 3);
   }
   $("gaveta-topo").innerHTML = `
@@ -1433,7 +1444,7 @@ document.addEventListener("click", async ev => {
     if (acao === "mapa") {
       const codigo = $("gaveta-topo").dataset.codigo;
       fecharDetalhe(); mudarVista("mapa");
-      const ir = () => { const p = kmz && kmz.pontos.find(x => x.categoria === "usina" && chaveCodigo(x.nome) === chaveCodigo(codigo.split("/")[0])); if (p) irPara(p.nome); };
+      const ir = () => { const p = pontoUsina(codigo); if (p) irPara(p.nome); };
       setTimeout(ir, kmz ? 300 : 1500);
       return;
     }
@@ -1567,7 +1578,7 @@ document.addEventListener("click", async ev => {
   const mapaBtn = ev.target.closest("[data-mt-mapa]");
   if (mapaBtn) {
     const cod = mapaBtn.dataset.mtMapa; mudarVista("mapa");
-    setTimeout(() => { const p = kmz && kmz.pontos.find(x => x.categoria === "usina" && chaveCodigo(x.nome) === chaveCodigo(cod.split("/")[0])); if (p) irPara(p.nome); }, kmz ? 300 : 1500);
+    setTimeout(() => { const p = pontoUsina(cod); if (p) irPara(p.nome); }, kmz ? 300 : 1500);
     return;
   }
   const b = ev.target.closest("[data-mt]");

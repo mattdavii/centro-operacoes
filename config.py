@@ -19,6 +19,8 @@ PADRAO = {
     "silencio_inicio": 20,       # horário sem som (celular e painel)
     "silencio_fim": 7,
     "porta": 47900,
+    "corrigir_codigos": {},      # sigla digitada errado pelo COG -> a certa do KMZ (ex.: {"CAD": "CAC"})
+    "kmz_preferir": {},          # código repetido no KMZ -> pasta (cliente) do ponto certo (ex.: {"CAC100": "Athon"})
 }
 
 

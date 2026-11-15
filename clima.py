@@ -34,7 +34,7 @@ TEMPO = {0: ("☀️", "céu limpo"), 1: ("🌤️", "poucas nuvens"), 2: ("⛅"
 def chave_codigo(c):
     """CAR101 e CAR100 → CAR1 (mesma regra do mapa)."""
     import re
-    m = re.match(r"^([A-Z]{2,4})(\d)", str(c or "").split("/")[0].strip().upper())
+    m = re.match(r"^([A-Z]{2,4})(\d)\d*$", str(c or "").split("/")[0].strip().upper())  # "CAC100 (Blackout)" não é código
     return m.group(1) + m.group(2) if m else None
 
 
@@ -227,7 +227,14 @@ def _local_da_usina(codigo):
     if codigo in us:
         return us[codigo]
     k = chave_codigo(codigo)
-    return next((l for c, l in us.items() if chave_codigo(c) == k), None) if k else None
+    achado = next((l for c, l in us.items() if chave_codigo(c) == k), None) if k else None
+    if achado or not k:
+        return achado
+    # outra unidade da mesma usina (CAC200 quando o KMZ só tem CAC100): vale se a sigla tem um ponto só
+    import re
+    sigla = re.match(r"[A-Z]+", k).group(0)
+    mesmos = {l for c, l in us.items() if re.fullmatch(sigla + r"\d{3}", c)}
+    return mesmos.pop() if len(mesmos) == 1 else None
 
 
 def nivel(precip, rajada, cod):
@@ -283,8 +290,19 @@ def _em_vigor(a, agora=None):
     return ini <= agora <= fim + 60
 
 
+def _codigo_no_kmz(codigo):
+    """O código do KMZ que dá a posição da usina (CAC200 → CAC100 quando o KMZ só tem o 100)."""
+    us = _ler().get("usinas") or {}
+    loc = _local_da_usina(codigo)
+    if not loc or any(chave_codigo(c) == chave_codigo(codigo) for c in us):
+        return codigo
+    return next((c for c, l in us.items() if l == loc and str(c)[:3] == str(codigo)[:3]), codigo)
+
+
 def avisos_da_usina(codigo):
     """Avisos do INMET em vigor agora sobre a usina (um por tipo: o mais severo)."""
+    if not str(codigo).startswith("cidade:"):
+        codigo = _codigo_no_kmz(codigo)
     k = codigo if str(codigo).startswith("cidade:") else chave_codigo(codigo)
     por_tipo = {}
     for a in _ler().get("avisos") or []:

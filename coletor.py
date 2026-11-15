@@ -29,10 +29,28 @@ def wa(*args, timeout=60):
     return json.loads(r.stdout)
 
 
+_correcoes = {"mtime": None, "rx": None, "mapa": {}}
+
+
+def corrigir_codigos(t):
+    """Sigla de usina digitada errado ("CAD200" quando no KMZ é CAC): config.json, campo corrigir_codigos."""
+    if not t:
+        return t
+    try:
+        mt = os.path.getmtime(config.ARQUIVO)
+    except OSError:
+        mt = None
+    if mt != _correcoes["mtime"]:
+        mapa = {k.upper(): v.upper() for k, v in (config.carregar().get("corrigir_codigos") or {}).items()}
+        _correcoes.update(mtime=mt, mapa=mapa,
+                          rx=re.compile(r"\b(" + "|".join(map(re.escape, mapa)) + r")(?=\d{3}\b)") if mapa else None)
+    return _correcoes["rx"].sub(lambda m: _correcoes["mapa"][m.group(1)], t) if _correcoes["rx"] else t
+
+
 def texto(m):
     tr = m.get("transcript")
     tr = tr.get("text", "") if isinstance(tr, dict) else tr
-    t = m.get("text") or (f"[áudio] {tr}" if tr else "")
+    t = corrigir_codigos(m.get("text")) or (f"[áudio] {tr}" if tr else "")
     if not t and m.get("media"):
         md = m["media"]
         t = f"[{md.get('kind', 'mídia') if isinstance(md, dict) else 'mídia'}]"
@@ -561,13 +579,13 @@ def operacao(chat, dados, agora=None, janela=None):
             continue
         if not de_uma_usina:
             cod_ctx = CODIGO.search(bruto)
-            pres = classificar_manutencao(m.get("text") or bruto)
+            pres = classificar_manutencao(corrigir_codigos(m.get("text")) or bruto)
             nome_ctx = extrair_nome_usina(bruto) or (pres[3] if pres and pres[0] in ("entrada", "saida") else None)
             if cod_ctx:
                 contexto = (m["ts"], cod_ctx.group(1), cod_ctx.group(1))
             elif nome_ctx:
                 contexto = (m["ts"], "nome:" + nome_ctx, "UFV " + nome_ctx)
-        man = classificar_manutencao(m.get("text") or bruto)
+        man = classificar_manutencao(corrigir_codigos(m.get("text")) or bruto)
         if man:
             mtipo, descricao, hora, citada = man
             cod = CODIGO.search(bruto)
@@ -636,7 +654,7 @@ def operacao(chat, dados, agora=None, janela=None):
     if de_uma_usina:
         citados = {}
         for m in ms:
-            for c in re.findall(r"UFV\s+([A-Z]{2,4}\d{3})\b", m.get("text") or ""):
+            for c in re.findall(r"UFV\s+([A-Z]{2,4}\d{3})\b", corrigir_codigos(m.get("text")) or ""):
                 citados[c] = citados.get(c, 0) + 1
         usina = {"jid": chat["jid"], "nome": rotulo_usina(nome), "grupo": nome, "citados": citados,
                  "msgs_24h": len(recentes), "ultima_ts": ms[-1]["ts"] if ms else None,
