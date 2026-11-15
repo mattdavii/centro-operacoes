@@ -24,6 +24,10 @@
   button:hover { background: #142553; border-color: #4169d6; }
   button.ativo { color: var(--verde); border-color: #1e7a4c; background: #0b2a1d; }
   .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+  * { scrollbar-width: thin; scrollbar-color: #24345e transparent; }
+  ::-webkit-scrollbar { width: 8px; height: 8px; } ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #1e2c52; border-radius: 8px; border: 2px solid transparent; background-clip: padding-box; }
+  ::-webkit-scrollbar-thumb:hover { background: #2c4178; background-clip: padding-box; }
 
   /* ---------- barra superior ---------- */
   header { display: grid; grid-template-columns: auto 1fr auto auto; gap: 18px; align-items: center; padding: 10px 18px;
@@ -31,13 +35,13 @@
   .marca { display: flex; align-items: center; gap: 12px; }
   .radar { width: 30px; height: 30px; border-radius: 50%; border: 2px solid var(--azul); position: relative; box-shadow: 0 0 14px #56ccff55; }
   .radar::after { content: ""; position: absolute; inset: 7px; border-radius: 50%; background: var(--azul); animation: pulso 2s infinite; }
-  .marca h1 { margin: 0; font-size: 18px; letter-spacing: 3px; font-weight: 700; color: var(--titulo); }
-  .marca small { display: block; font-size: 10px; letter-spacing: 2.5px; color: var(--rotulo); font-weight: 600; }
+  .marca h1 { margin: 0; font-size: 18px; letter-spacing: 3px; font-weight: 700; color: var(--titulo); white-space: nowrap; }
+  .marca small { display: block; font-size: 10px; letter-spacing: 2.5px; color: var(--rotulo); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 320px; }
   .plantao { justify-self: center; display: flex; align-items: center; gap: 12px; padding: 6px 14px; border-radius: 10px; border: 1px solid #7f1d2a;
              background: linear-gradient(90deg, #2a0710, #160510); box-shadow: 0 0 0 0 #ff4d5e66; animation: brilho 2.4s infinite; }
   .plantao.inativo { border-color: var(--linha); background: var(--painel); animation: none; }
   .plantao b { color: #ffd5da; letter-spacing: 2px; font-size: 12px; }
-  .plantao span { color: #f9a8b4; font-size: 11px; }
+  .plantao span { color: #f9a8b4; font-size: 11px; white-space: nowrap; }
   .plantao .resta { font-family: var(--mono); color: #fff; font-size: 13px; }
   .relogio { text-align: right; }
   .relogio .hora { font-family: var(--mono); font-size: 30px; font-weight: 600; letter-spacing: 1px; color: #fff; line-height: 1; text-shadow: 0 0 18px #56ccff55; }
@@ -262,7 +266,8 @@
   .tl { position: relative; padding: 4px 12px 8px; }
   .tl-eixo { position: relative; height: 16px; margin-left: 190px; border-bottom: 1px solid var(--linha); }
   .tl-eixo span { position: absolute; transform: translateX(-50%); font-family: var(--mono); font-size: 9px; color: var(--fraco); }
-  .tl-linhas { max-height: 210px; overflow-y: auto; }
+  .tl-linhas { max-height: 250px; overflow-y: auto; overflow-x: hidden; }
+  .tl-sep { font-size: 9px; letter-spacing: 1.2px; color: var(--fraco); font-weight: 700; padding: 6px 0 2px 190px; border-top: 1px dashed var(--linha); margin-top: 4px; }
   .tl-linha { display: grid; grid-template-columns: 182px 1fr; gap: 8px; align-items: center; height: 18px; cursor: pointer; }
   .tl-linha:hover { background: #0c1730; }
   .tl-nome { font-size: 11px; color: var(--texto); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: right; }
@@ -270,7 +275,7 @@
   .tl-barra { position: absolute; top: 5px; height: 8px; border-radius: 4px; min-width: 6px; background: var(--cor); }
   .tl-barra.aberta { box-shadow: 0 0 8px var(--cor); }
   .tl-agora { position: absolute; top: 0; bottom: 0; width: 1px; background: #fff8; pointer-events: none; }
-  .tl-agora::after { content: "agora"; position: absolute; top: -14px; left: 3px; font-size: 9px; color: #fffa; font-family: var(--mono); }
+  .tl-eixo .agora-eixo { left: auto; right: 0; transform: none; color: #fffa; }
   .tl-grade { position: absolute; top: 0; bottom: 0; width: 1px; background: #16264d88; pointer-events: none; }
   .legenda-st { display: flex; gap: 12px; font-size: 10px; color: var(--fraco); margin-left: auto; font-weight: 600; letter-spacing: .5px; }
   .legenda-st i { display: inline-block; width: 10px; height: 6px; border-radius: 3px; margin-right: 4px; vertical-align: 1px; }
@@ -339,7 +344,11 @@
   @keyframes brilho { 0%, 100% { box-shadow: 0 0 0 0 #ff4d5e00; } 50% { box-shadow: 0 0 18px 2px #ff4d5e40; } }
   @keyframes alarmeKpi { 50% { background: #2a0710; } }
 
-  @media (max-width: 1500px) { main { grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); } .col3 { grid-column: 1 / -1; display: grid; grid-template-columns: 1fr 1fr; } }
+  @media (max-width: 1500px) { main { grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); } .col3 { grid-column: 1 / -1; display: grid; grid-template-columns: 1fr 1fr; }
+    header { gap: 12px; padding: 8px 14px; } .marca h1 { font-size: 15px; letter-spacing: 2px; } .marca small { font-size: 9px; letter-spacing: 1.5px; max-width: 230px; }
+    .relogio .hora { font-size: 24px; } .plantao { padding: 5px 10px; gap: 8px; }
+    .estado .chips button { padding: 3px 7px; font-size: 11px; } .vistas button { padding: 3px 6px; font-size: 11px; }
+    .estado .rot { display: none; } }
   @media (max-width: 1000px) {
     header { grid-template-columns: 1fr auto; } .plantao { grid-column: 1 / -1; justify-self: stretch; order: 5; }
     .kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); } main, .aovivo, .col3 { grid-template-columns: 1fr; display: grid; }
@@ -350,6 +359,11 @@
     .estado { align-items: flex-start; } .chips { flex-wrap: wrap; } .marca h1 { font-size: 15px; letter-spacing: 2px; }
     .plantao { flex-wrap: wrap; } .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 10px 12px 0; }
     main { padding: 10px 12px; } .aovivo { margin: 0 12px 12px; } .painel > h2 { flex-wrap: wrap; }
+    .legenda-st { flex-wrap: wrap; gap: 4px 10px; font-size: 9px; } .vistas button { white-space: nowrap; }
+    header { position: static; grid-template-columns: minmax(0, 1fr); } header > * { min-width: 0; }
+    .estado { width: 100%; } .estado .rot { display: none; } .plantao { flex-wrap: wrap; }
+    .vistas { max-width: 100%; overflow-x: auto; scrollbar-width: none; } .vistas::-webkit-scrollbar { display: none; }
+    .tl-linha { grid-template-columns: 96px 1fr; } .tl-eixo { margin-left: 104px; } .tl-sep { padding-left: 104px; } .tl-nome { font-size: 10px; }
     .kpi .v { font-size: 24px; }
   }
 </style>
@@ -366,10 +380,10 @@
     </div>
     <div class="chips">
       <button id="btn-som" title="Toca um alarme e mostra notificação quando surgir ocorrência crítica ou alguém te marcar">🔇 Alertas desligados</button>
-      <button id="btn-sync" title="Busca mensagens novas agora">⟳ Sincronizar</button>
-      <button id="btn-teste" title="Dispara um alarme de teste no celular (em até 1 min) e aqui">🔔 Testar alarme</button>
+      <button id="btn-sync" title="Sincronizar: busca mensagens novas agora">⟳<span class="rot"> Sincronizar</span></button>
+      <button id="btn-teste" title="Testar alarme: dispara um alarme de teste no celular (em até 1 min) e aqui">🔔<span class="rot"> Testar alarme</span></button>
       <button id="btn-bloqueio" hidden title="Painel do plantão por cima da tela de bloqueio ao acender a tela (só com o plantão ativo)">🔒 Tela de bloqueio</button>
-      <button id="btn-celular" class="so-pc" title="Mostra o QR para conectar o app Android a este PC">📱 Conectar celular</button>
+      <button id="btn-celular" class="so-pc" title="Conectar celular: mostra o QR para conectar o app Android a este PC">📱<span class="rot"> Conectar celular</span></button>
       <button id="btn-tela" title="Tela cheia (F)">⛶</button>
       <span class="vistas"><button class="sel" data-vista="painel">PAINEL</button><button data-vista="mapa">MAPA</button><button data-vista="manutencoes">MANUTENÇÕES</button><button data-vista="clima" id="aba-clima">CLIMA</button><button data-vista="indicadores">INDICADORES</button></span>
     </div>
@@ -931,7 +945,7 @@ function desenhar() {
         ${o.normalizado ? `<button data-oc="reabrir" title="A baixa foi errada: volta a ficar aberta">REABRIR</button>` : ""}</span></div></div>`;
   };
   $("ocorrencias").innerHTML = listaOc.filter(o => filtroOc !== "abertas" || o.status !== "em_tratativa").map(cardOc).join("")
-    || `<div class="vazio">${filtroOc === "abertas" ? (emTratativa.length ? "Nenhuma ocorrência aberta fora as em tratativa. ✅" : `Nenhuma ocorrência aberta nas últimas ${JAN()} h. ✅`) : "Nada aqui."}</div>`;
+    || `<div class="vazio">${filtroOc === "abertas" ? (emTratativa.length ? `Nada andando agora. ✅ As ${emTratativa.length} que ficaram para outro momento estão em ⏳ Em tratativa, logo abaixo.` : `Nenhuma ocorrência aberta nas últimas ${JAN()} h. ✅`) : "Nada aqui."}</div>`;
   $("painel-tratativa").hidden = !emTratativa.length;
   $("q-trat").textContent = emTratativa.length;
   $("tratativa").innerHTML = emTratativa.map(cardOc).join("");
@@ -1512,16 +1526,24 @@ function desenharLinhaDoTempo() {
   $("q-tl").textContent = ocs.length;
   const pos = ts => Math.max(0, Math.min(100, (ts - ini) / total * 100));
   // marcas do eixo a cada 3 h (ou 6 h quando passa de 24 h)
-  const passo = (total > 26 * 3600 ? 6 : 3) * 3600;
+  const estreito = ($("tl-eixo").clientWidth || 800) < 420;  // celular: menos marcas para não encavalar
+  const passo = (total > 26 * 3600 ? (estreito ? 12 : 6) : (estreito ? 6 : 3)) * 3600;
   const marcas = [];
   for (let t = Math.ceil(ini / passo) * passo; t <= agoraS; t += passo) marcas.push(t);
   const fmtEixo = t => { const x = new Date(t * 1000); return x.getHours() === 0 ? x.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" }) : String(x.getHours()).padStart(2, "0") + "h"; };
-  $("tl-eixo").innerHTML = marcas.map(t => `<span style="left:${pos(t)}%">${fmtEixo(t)}</span>`).join("");
+  $("tl-eixo").innerHTML = marcas.filter(t => pos(t) < (estreito ? 86 : 96)).map(t => `<span style="left:${pos(t)}%">${fmtEixo(t)}</span>`).join("") + `<span class="agora-eixo">agora</span>`;
   const grade = marcas.map(t => `<div class="tl-grade" style="left:${pos(t)}%"></div>`).join("") + `<div class="tl-agora" style="left:100%"></div>`;
   const manut = (d.atividades || []).filter(a => (a.fim_ts || agoraS) >= ini).map(a => ({ manut: true, ...a }));
-  const linhas = [...ocs, ...manut].sort((a, b) => a.inicio_ts - b.inicio_ts);
+  // abertas (críticas, depois alertas) e manutenções em andamento em cima; normalizadas embaixo, as mais novas primeiro
+  const peso = o => o.manut ? (o.fim_ts ? 3 : 1) : o.normalizado ? 3 : o.sev === "critico" ? 0 : 1;
+  const linhas = [...ocs, ...manut].sort((a, b) => peso(a) - peso(b) || (peso(a) === 3 ? b.inicio_ts - a.inicio_ts : a.inicio_ts - b.inicio_ts));
   $("q-tl").textContent = linhas.length;
+  let separou = false;
   $("tl-linhas").innerHTML = linhas.length ? linhas.map(o => {
+    const sep = !separou && peso(o) === 3 && linhas.some(x => peso(x) < 3) ? (separou = true, `<div class="tl-sep">JÁ RESOLVIDAS</div>`) : "";
+    return sep + linhaTl(o);
+  }).join("") : `<div class="vazio">Nenhuma ocorrência ou manutenção no período.</div>`;
+  function linhaTl(o) {
     if (o.manut) {
       const fim = o.fim_ts || agoraS, cor = o.status === "cancelada" || o.status === "sem_termino" ? "#64748b" : "#3987e5";
       const dica = `🔧 ${o.usina}\n${o.descricao}\n${dhm(o.inicio_ts)} → ${o.fim_ts ? dhm(o.fim_ts) : "em andamento"} · ${dur(fim - o.inicio_ts)}`;
@@ -1533,9 +1555,9 @@ function desenharLinhaDoTempo() {
     const cor = !o.normalizado ? (o.sev === "critico" ? "var(--vermelho)" : "var(--amarelo)") : motivo === "inatividade" ? "#64748b" : "var(--verde)";
     const estado = !o.normalizado ? (o.sev === "critico" ? "Crítica, aberta" : "Alerta, aberto") : motivoBaixa(o).toLowerCase();
     const dica = `${o.usina}\n${estado}\n${dhm(o.inicio_ts)} → ${o.normalizado ? dhm(fim) : "agora"} · ${dur(fim - o.inicio_ts)}\n${o.msg.texto.slice(0, 120)}`;
-    return `<div class="tl-linha" data-tl="${esc(o.chave)}" data-dica="${esc(dica)}"><div class="tl-nome">${esc(o.usina)}</div>
+    return `<div class="tl-linha" data-tl="${esc(o.chave)}" data-dica="${esc(dica)}"><div class="tl-nome">${esc(nomeUsina(o).replace(/^UFVs?\s+/, ""))}</div>
       <div class="tl-trilho">${grade}<div class="tl-barra ${o.normalizado ? "" : "aberta"}" style="--cor:${cor};left:${pos(o.inicio_ts)}%;width:${Math.max(0.6, pos(fim) - pos(o.inicio_ts))}%"></div></div></div>`;
-  }).join("") : `<div class="vazio">Nenhuma ocorrência ou manutenção no período.</div>`;
+  }
 }
 document.addEventListener("click", ev => { const l = ev.target.closest("[data-tl]"); if (l) abrirDetalhe(l.dataset.tl); });
 
