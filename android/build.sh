@@ -16,8 +16,8 @@ SAIDA="$RAIZ/dist/CentroOperacoes.apk"
 MIN_SDK=29
 ALVO_SDK=34
 
-# versão: a do projeto (arquivo VERSAO na raiz); quem sobe o número é o publicar.sh
-VERSAO="$(cat "$RAIZ/VERSAO")"
+# versão do app (APP_VERSAO): só sobe quando o app Android muda (o publicar.sh confere); o painel tem a sua (VERSAO)
+VERSAO="$(cat "$RAIZ/APP_VERSAO")"
 
 rm -rf "$OBJ" && mkdir -p "$OBJ"/{assets,classes,dex,res} "$RAIZ/dist"
 

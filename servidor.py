@@ -355,7 +355,7 @@ def teste_alarme():
 
 
 APK_PADRAO = f"https://github.com/{config.REPOSITORIO}/releases/latest/download/CentroOperacoes.apk"
-_release = {"quando": 0, "versao": 0, "apk": APK_PADRAO, "notas": ""}
+_release = {"quando": 0, "versao": 0, "app": 0, "apk": APK_PADRAO, "notas": ""}
 
 
 def versao_local():
@@ -379,7 +379,10 @@ def ultima_release():
         with urllib.request.urlopen(req, timeout=10) as r:
             d = json.load(r)
         _release["versao"] = int(str(d.get("tag_name", "v0")).lstrip("vV") or 0)
-        _release["notas"] = (d.get("body") or "")[:1500]
+        corpo = d.get("body") or ""
+        _release["notas"] = corpo.split("app-versao:")[0].strip()[:1500]
+        m = re.search(r"app-versao:\s*(\d+)", corpo)  # a versão do APK (só muda quando o app Android muda)
+        _release["app"] = int(m.group(1)) if m else _release["versao"]
         _release["apk"] = next((a["browser_download_url"] for a in d.get("assets", []) if a["name"].endswith(".apk")), APK_PADRAO)
     except Exception:
         pass
@@ -400,7 +403,7 @@ def versoes():
     rel = ultima_release()
     pc = versao_local()
     return {"tela": tela, "pc": pc, "ultima": rel["versao"], "pc_nova": rel["versao"] > pc, "notas": rel["notas"],
-            "app": max(rel["versao"], local_apk), "apk": rel["apk"]}
+            "app": max(rel["app"], local_apk), "apk": rel["apk"]}
 
 
 def ip_tailscale():
