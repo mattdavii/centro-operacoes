@@ -547,16 +547,14 @@ def montar_ocorrencias(eventos, usinas, vinculos=None):
     for o in ocorrencias:
         if o["normalizado"] or agora - o["ultima_ts"] < INATIVIDADE:
             continue
-        if o["sev"] == "alerta" or o.get("generico"):
+        if o.get("generico"):
+            # conversa solta de grupo geral, sem usina identificada: não é ocorrência de usina, sai sozinha
             o["normalizado"] = {"ts": o["ultima_ts"] + INATIVIDADE, "de": "painel", "motivo": "inatividade",
-                                "texto": f"sem avisos novos há {INATIVIDADE // 3600} h: baixa automática por inatividade"}
+                                "texto": f"sem avisos novos há {INATIVIDADE // 3600} h: conversa de grupo geral encerrada"}
             o["fim_ts"] = o["normalizado"]["ts"]
-        elif agora - o["ultima_ts"] >= SEM_REGISTRO:
-            # crítica sem nenhum aviso novo por 24 h: sai das abertas como "sem registro" (o COG fala de usina
-            # parada pelo menos uma vez por dia; se ninguém falou mais nada, não fica aberta para sempre)
-            o["normalizado"] = {"ts": o["ultima_ts"] + SEM_REGISTRO, "de": "painel", "motivo": "sem_registro",
-                                "texto": "24 h sem nenhum aviso novo e sem normalização registrada no WhatsApp"}
-            o["fim_ts"] = o["normalizado"]["ts"]
+        else:
+            # ocorrência de usina sem novidade: não fecha sozinha; o painel pergunta se continua com o mesmo status
+            o["confirmar"] = {"desde": o["ultima_ts"]}
     # estado de cada usina para o quadro: pior ocorrência aberta das últimas 24 h
     extras = {}
     for o in ocorrencias:

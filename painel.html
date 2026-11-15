@@ -185,6 +185,11 @@
   @media (max-width: 1000px) { #vista-mapa { grid-template-columns: 1fr; padding: 10px 12px; } #mapa { height: 60vh; } }
 
   .no-app #btn-tela, .no-app .so-pc { display: none; }
+  /* pergunta: ocorrência sem novidade continua? */
+  .pergunta { margin-top: 6px; padding: 7px 9px; border-radius: 7px; background: #1d1606; border: 1px solid #5c4310; font-size: 12px; color: #fde68a;
+              display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }
+  .pergunta button { font-size: 10px; padding: 3px 8px; }
+  .pergunta .sim { color: var(--azul); border-color: #2b4a99; } .pergunta .nao { color: var(--verde); border-color: #1e7a4c; }
   /* manutenções e técnicos em campo */
   .tag.manut { color: #cfe3ff; background: #12306b; }
   .campo-sub { font-size: 10px; letter-spacing: 1.2px; color: var(--rotulo); font-weight: 700; margin: 2px 0 6px; }
@@ -559,6 +564,10 @@ function verificarNovos(d) {
     const k = "oc:" + o.chave + ":" + o.sev;
     if (!o.normalizado && !vistos.has(k)) novos.push(["oc", o, k]);
   }
+  for (const o of d.ocorrencias || []) {
+    const k = "cf:" + o.chave + ":" + (o.confirmar ? o.confirmar.desde : "");
+    if (o.confirmar && !o.normalizado && !vistos.has(k)) novos.push(["cf", o, k]);
+  }
   for (const p of d.aguardando || []) {
     const k = "ag:" + p.chave + ":" + p.desde_ts;
     if (!p.fechamento && !vistos.has(k)) novos.push(["ag", p, k]);
@@ -569,6 +578,10 @@ function verificarNovos(d) {
     if (crit.length) { notificar(`🚨 ${crit[0][1].usina}`, crit[0][1].msg.texto.slice(0, 160), true); ultimoReforco = Date.now(); }
     else if (marc.length) notificar(`📣 ${marc[0][1].nome} te marcou`, (marc[0][1].previa[0] || {}).texto || "", false);
     else if (novos.some(([t, o]) => t === "oc")) bip(false);
+    const cf = novos.filter(([t]) => t === "cf");
+    if (cf.length && somLigado && "Notification" in window && Notification.permission === "granted") {
+      try { new Notification(`⏸ ${cf[0][1].usina}: sem novidades`, { body: "Continua com o mesmo status? Abra o painel para confirmar.", silent: true }); } catch {}
+    }
   }
   novos.forEach(([, , k]) => vistos.add(k));
   primeira = false;
@@ -645,6 +658,9 @@ function desenhar() {
         <div class="texto">${esc(o.msg.texto)}</div>
         <div class="quem">${esc(o.msg.de)} · ${esc(o.grupos.join(" · "))}</div>
         ${o.normalizado ? `<div class="norm">✔ ${hm(o.normalizado.ts)} ${esc(o.normalizado.de)}: ${esc(o.normalizado.texto.slice(0, 140))}</div>` : ""}
+        ${o.confirmar ? `<div class="pergunta">⏸ Sem novidades há ${dur(agora() - o.confirmar.desde)}. Continua com o mesmo status?
+          <button class="sim" data-oc="acompanhar" title="Segue aberta; pergunta de novo depois de 6 h sem novidade">CONTINUAR ACOMPANHANDO</button>
+          <button class="nao" data-oc="encerrar" title="Já foi resolvida">JÁ FOI RESOLVIDA</button></div>` : ""}
       </div>
       <div class="lado"><span class="tempo">${tempo}</span><span class="hora">${dhm(o.inicio_ts)}</span>
         <span style="display:flex;gap:4px">${!o.normalizado && !o.ciente ? `<button data-oc="ciente" title="Para o alarme; a ocorrência continua aberta">CIENTE</button>` : ""}
@@ -1079,6 +1095,7 @@ function desenharDetalhe(o, mensagens) {
     <div class="meta-g" style="margin-top:4px">${esc((o.grupos || []).join(" · "))}</div>
     <div class="botoes">
       ${!norm && !o.ciente ? `<button data-det="ciente">CIENTE</button>` : ""}
+      ${o.confirmar ? `<button data-det="acompanhar" title="Sem novidades há ${dur(agora() - o.confirmar.desde)}: segue aberta, pergunta de novo em 6 h">⏸ CONTINUAR ACOMPANHANDO</button>` : ""}
       ${!norm ? `<button data-det="encerrar">ENCERRAR</button>` : ""}
       ${norm ? `<button data-det="reabrir" title="A baixa foi errada: volta a ficar aberta">REABRIR</button>` : ""}
       ${o.codigo ? `<button data-det="mapa">📍 VER NO MAPA</button>` : ""}

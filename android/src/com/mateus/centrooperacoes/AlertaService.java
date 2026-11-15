@@ -192,6 +192,18 @@ public class AlertaService extends Service {
                 notificar(nm, k.hashCode(), CANAL_AVISO, "📣 " + m.optString("nome") + " te marcou", m.optString("texto"));
             }
         }
+        // ocorrência sem novidade há 6 h: pergunta se continua (aviso sem alarme; responde no painel)
+        JSONArray conf = d.optJSONArray("confirmar");
+        for (int i = 0; conf != null && i < conf.length(); i++) {
+            JSONObject c = conf.getJSONObject(i);
+            String k = "cf:" + c.optString("chave") + ":" + c.optLong("desde");
+            atuais.add(k);
+            if (!vistos.contains(k) && !primeira) {
+                long horas = Math.max(1, (System.currentTimeMillis() / 1000 - c.optLong("desde")) / 3600);
+                notificar(nm, k.hashCode(), CANAL_AVISO, "⏸ " + c.optString("usina") + ": sem novidades há " + horas + " h",
+                        "Continua com o mesmo status? Abra o painel e toque em CONTINUAR ACOMPANHANDO ou JÁ FOI RESOLVIDA.");
+            }
+        }
         // escalonamento: no plantão, crítica sem "ciente" toca de novo a cada 5 min
         long agora = System.currentTimeMillis();
         if (plantao && semCiente > 0 && agora - ultimoReforco >= REFORCO_MS && !primeira && !emSilencio()) {

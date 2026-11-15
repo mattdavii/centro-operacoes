@@ -138,6 +138,7 @@ def acoes_por_mensagem(acoes):
     out = {}
     for chave, a in acoes.items():
         tipo, base = ("enc", chave[4:]) if chave.startswith("enc:") else ("keep", chave[5:]) if chave.startswith("keep:") \
+            else ("acomp", chave[6:]) if chave.startswith("acomp:") \
             else ("ciente", chave) if a.get("tipo") == "ciente" else (None, None)
         if not tipo:
             continue
@@ -152,8 +153,22 @@ def ocorrencias_com_acoes(d, acoes):
     # as marcações valem pelas MENSAGENS da ocorrência, não só pela identificação dela: se a ocorrência for
     # remontada (outra identificação), quem compartilha um aviso com a antiga herda o ciente/encerrar/reabrir
     por_msg = acoes_por_mensagem(acoes)
+    agora = time.time()
+    # ocorrências de usina ainda abertas que saíram da janela de 24 h: continuam no painel até você decidir
+    # (CONTINUAR ACOMPANHANDO ou ENCERRAR); não entram se a mesma ocorrência já está ao vivo (remontada)
+    vivas = d["ocorrencias"]
+    ids_vivos = {i for o in vivas for i in (o.get("ids") or [])}
+    chaves_vivas = {o["chave"] for o in vivas}
+    usinas_abertas = {o["chave_usina"] for o in vivas if not o["normalizado"]}
+    guardadas = []
+    for k, h in relatorio._ler(relatorio.HIST, {}).items():
+        if k in chaves_vivas or h.get("normalizado") or h.get("generico") or not indicadores.de_usina(h):
+            continue
+        if set(h.get("ids") or []) & ids_vivos or h.get("chave_usina") in usinas_abertas:
+            continue
+        guardadas.append(dict(h, fora_da_janela=True))
     ocorrencias = []
-    for o in d["ocorrencias"]:
+    for o in vivas + guardadas:
         herdadas = {}
         for mid in o.get("ids") or []:
             for tipo, a in por_msg.get(mid, {}).items():
@@ -169,6 +184,12 @@ def ocorrencias_com_acoes(d, acoes):
             o["normalizado"] = {"ts": enc["ts"], "de": "você", "motivo": "manual", "texto": "encerrada no painel" +
                                 (f": {enc['nota']}" if enc.get("nota") else "")}
             o["encerrada_manual"] = True
+        # sem novidade por 6 h: pergunta se continua (CONTINUAR ACOMPANHANDO adia a pergunta por mais 6 h)
+        acomp = acoes.get("acomp:" + o["chave"]) or herdadas.get("acomp")
+        base = max(o["ultima_ts"], acomp["ts"] if acomp else 0)
+        o.pop("confirmar", None)
+        if not o["normalizado"] and not o.get("generico") and agora - base >= coletor.INATIVIDADE:
+            o["confirmar"] = {"desde": o["ultima_ts"], "acompanhando": bool(acomp)}
         ocorrencias.append(o)
     ocorrencias.sort(key=lambda o: (o["normalizado"] is not None, -o["ultima_ts"]))
     usinas = []
@@ -576,6 +597,8 @@ class Pagina(http.server.BaseHTTPRequestHandler):
                                            if (o.get("durante_manutencao") or {}).get("ate_agora") else "") + o["msg"]["texto"][:200]}
                                 for o in p["ocorrencias"] if not o["normalizado"]]
                                + teste_alarme(),
+                "confirmar": [{"chave": o["chave"], "usina": o["usina"], "desde": o["confirmar"]["desde"]}
+                              for o in p["ocorrencias"] if o.get("confirmar") and not o["normalizado"]],
                 "marcacoes": [{"chave": a["chave"], "nome": a["nome"], "desde_ts": a["desde_ts"],
                                "texto": (a["previa"][0] if a["previa"] else {}).get("texto", "")[:200]}
                               for a in p["aguardando"] if a.get("motivo") == "marcou você"],
@@ -635,17 +658,20 @@ class Pagina(http.server.BaseHTTPRequestHandler):
             return self.responder(400, {"erro": "ação de plantão inválida"})
         if self.path == "/api/acao":
             chave, tipo = corpo.get("chave"), corpo.get("tipo")
-            if not chave or tipo not in ("respondi", "resolvido", "ignorar", "lembrar", "desfazer", "ciente", "encerrar", "reabrir"):
+            if not chave or tipo not in ("respondi", "resolvido", "ignorar", "lembrar", "desfazer", "ciente", "encerrar", "reabrir", "acompanhar"):
                 return self.responder(400, {"erro": "ação inválida"})
             with trava:
                 acoes = ler_acoes()
-                atual = next((o for o in (estado["dados"] or {}).get("ocorrencias", []) if o["chave"] == chave), None)
+                atual = next((o for o in (estado["dados"] or {}).get("ocorrencias", []) if o["chave"] == chave), None) \
+                    or relatorio._ler(relatorio.HIST, {}).get(chave)
                 ids = (atual or {}).get("ids") or []
                 if tipo == "desfazer":
                     acoes.pop(chave, None)
                 elif tipo == "reabrir":
                     acoes.pop("enc:" + chave, None)
                     acoes["keep:" + chave] = {"tipo": "reabrir", "ts": int(time.time()), "ids": ids}
+                elif tipo == "acompanhar":
+                    acoes["acomp:" + chave] = {"tipo": "acompanhar", "ts": int(time.time()), "ids": ids}
                 elif tipo == "encerrar":
                     acoes["enc:" + chave] = {"tipo": "encerrar", "ts": int(time.time()), "nota": str(corpo.get("nota", ""))[:200], "ids": ids}
                 else:

@@ -35,11 +35,12 @@ def registrar(ocorrencias, codigos):
     hist = {k: v for k, v in hist.items() if k in atuais or v.get("inicio_ts", 0) < janela}
     for o in ocorrencias:
         hist[o["chave"]] = o
-    # saiu da janela ao vivo ainda "aberta" e sem normalização: não fica aberta para sempre no histórico
-    for k, v in hist.items():
-        if k not in atuais and not v.get("normalizado") and v.get("ultima_ts", 0) < janela:
-            v["normalizado"] = {"ts": v["ultima_ts"], "de": "histórico", "motivo": "sem_registro",
-                                "texto": "sem normalização registrada no WhatsApp"}
+    # saiu da janela ainda aberta: continua aberta (o painel pergunta se segue). Só sai a cópia que foi
+    # remontada com outra identificação (as mesmas mensagens estão numa ocorrência atual)
+    ids_atuais = {i for o in ocorrencias for i in (o.get("ids") or [])}
+    for k in [k for k, v in hist.items() if k not in atuais and not v.get("normalizado")
+              and set(v.get("ids") or []) & ids_atuais]:
+        del hist[k]
     limite = time.time() - GUARDAR
     hist = {k: v for k, v in hist.items() if v.get("ultima_ts", 0) >= limite}
     _gravar(HIST, hist)

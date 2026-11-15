@@ -167,8 +167,8 @@ def main():
         ["<b>CIENTE</b>", "Para o alarme daquela ocorrência (ela continua aberta)."],
         ["<b>ENCERRAR / REABRIR</b>", "Fecha à mão o que foi resolvido sem aviso no grupo; REABRIR desfaz qualquer baixa errada."],
         ["<b>Baixa automática</b>", "Só com normalização confirmada: o \"Normalização\" do COG, \"usina religada\", \"pode encerrar a OS\". Pergunta, "
-         "negação, intenção ou \"parece que voltou\" não fecham. Alerta sem aviso por 6 h sai por inatividade; crítica de "
-         "usina só fecha com confirmação (ou 24 h sem nenhum aviso, como \"sem registro\")."],
+         "negação, intenção ou \"parece que voltou\" não fecham. Nada fecha por tempo: depois de 6 h sem novidade, a "
+         "ocorrência pergunta \"Continua com o mesmo status?\" (CONTINUAR ACOMPANHANDO ou JÁ FOI RESOLVIDA)."],
         ["<b>Em campo · Manutenções</b>", "Quem está em qual usina agora (pelas mensagens \"Entrada em UFV ...\" / \"Saída\") e as "
          "atividades do COG do dia (em andamento, concluída, cancelada). Aparecem também no mapa, na linha do tempo (barras azuis), "
          "no relatório do plantão e nos indicadores."],
