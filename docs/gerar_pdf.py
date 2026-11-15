@@ -191,7 +191,10 @@ def main():
     h.append(Paragraph("No celular", st["h2"]))
     h += lista([
         "Crítica nova: <b>alarme</b> (e repete a cada 5 min no plantão até você dar CIENTE). Alerta ou marcação: notificação normal.",
+        "Ocorrência sem novidade há 6 h: aviso \"Usina: sem novidades há 6 h\" (sem alarme) para você confirmar no painel.",
+        "Ocorrência que começou durante uma manutenção: aviso normal, sem alarme.",
         "PC ou WhatsApp do PC fora do ar por 10 min: aviso (alarme no plantão).",
+        "Das 20h às 7h nada toca nem vibra: as notificações chegam em silêncio (mude em config.json).",
         "Sem conexão com o PC, o app mostra os últimos dados guardados.",
     ])
 
@@ -201,7 +204,20 @@ def main():
         "<b>PC:</b> aparece a faixa \"Nova versão do Centro de Operações\" com <b>ATUALIZAR AGORA</b> (baixa e reinicia sozinho).",
         "<b>Celular:</b> a tela se atualiza sozinha. Quando o app muda, chega a notificação \"Nova versão\": toque e instale.",
     ])
-    h.append(Paragraph("5. Privacidade", st["h1"]))
+    h.append(Paragraph("5. Problemas comuns", st["h1"]))
+    h.append(tabela([
+        ["Problema", "O que fazer"],
+        ["Painel sem dados ou \"WhatsApp desconectado\"", "Abra o wa-app e confira se o WhatsApp está conectado (comando "
+         "<font face='%s'>wa estado</font>). O painel volta sozinho em até 1 minuto." % MONO],
+        ["Celular não conecta pelo QR", "Tailscale ligado no celular e no PC, com a mesma conta. No Windows, libere o firewall "
+         "(o instalador mostra o comando de administrador)."],
+        ["App não toca", "Permita notificações e \"não otimizar bateria\" para o app. Fora do horário de silêncio, use "
+         "Testar alarme no PC."],
+        ["Mesma usina aparece duas vezes", "Ligue o código ao grupo no arquivo vinculos.json (\"CÓDIGO\": \"nome do grupo\")."],
+        ["Ocorrência fechou ou abriu errado", "Use REABRIR ou ENCERRAR. Se repetir, mande o caso para quem mantém o projeto: "
+         "ele vira teste e a regra é corrigida."],
+    ], [56 * mm, 118 * mm]))
+    h.append(Paragraph("6. Privacidade", st["h1"]))
     h.append(Paragraph("Tudo roda no seu PC. O painel só lê o WhatsApp pelo wa-app e nunca envia mensagem. Configuração, senha "
                        "do celular, histórico e relatórios ficam na pasta de dados do seu PC (Linux "
                        "<font face='%s'>~/.local/share/centro-operacoes</font>, Windows "
