@@ -186,6 +186,28 @@ public class MainActivity extends Activity {
             runOnUiThread(() -> web.loadUrl("file:///android_asset/index.html"));
         }
 
+        /** Painel do plantão na tela de bloqueio: {"ativo": escolhido, "permissao": pode sobrepor}. */
+        @JavascriptInterface
+        public String telaBloqueio() {
+            boolean ativo = getSharedPreferences("app", MODE_PRIVATE).getBoolean("tela_bloqueio", true);
+            return "{\"ativo\":" + ativo + ",\"permissao\":" + Settings.canDrawOverlays(MainActivity.this) + "}";
+        }
+
+        /** Liga/desliga. Ligar sem a permissão abre a tela do Android "Sobrepor a outros apps". */
+        @JavascriptInterface
+        public void ativarTelaBloqueio(boolean ativo) {
+            getSharedPreferences("app", MODE_PRIVATE).edit().putBoolean("tela_bloqueio", ativo).apply();
+            if (ativo && !Settings.canDrawOverlays(MainActivity.this)) {
+                runOnUiThread(() -> {
+                    try {
+                        startActivity(new Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:" + getPackageName())));
+                        Toast.makeText(MainActivity.this, "Ative \"Permitir sobreposição\" para o Centro de Operações", Toast.LENGTH_LONG).show();
+                    } catch (Exception ignorada) {
+                    }
+                });
+            }
+        }
+
         /** Versão instalada do app, para o painel avisar quando houver uma mais nova no PC. */
         @JavascriptInterface
         public int versao() {

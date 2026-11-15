@@ -11,6 +11,8 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <!-- painel do plantão por cima da tela de bloqueio: abrir a tela quando o celular acende -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
 
     <!-- o PC é acessado por http dentro do Tailscale, que já criptografa a conexão -->
     <application
@@ -38,6 +40,17 @@
                 <data android:scheme="centrooperacoes" android:host="parear" />
             </intent-filter>
         </activity>
+
+        <activity
+            android:name=".PlantaoBloqueioActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:taskAffinity=".bloqueio"
+            android:launchMode="singleTask"
+            android:noHistory="true"
+            android:showWhenLocked="true"
+            android:screenOrientation="portrait"
+            android:theme="@android:style/Theme.DeviceDefault.NoActionBar" />
 
         <service
             android:name=".AlertaService"

@@ -366,6 +366,7 @@
       <button id="btn-som" title="Toca um alarme e mostra notificação quando surgir ocorrência crítica ou alguém te marcar">🔇 Alertas desligados</button>
       <button id="btn-sync" title="Busca mensagens novas agora">⟳ Sincronizar</button>
       <button id="btn-teste" title="Dispara um alarme de teste no celular (em até 1 min) e aqui">🔔 Testar alarme</button>
+      <button id="btn-bloqueio" hidden title="Painel do plantão por cima da tela de bloqueio ao acender a tela (só com o plantão ativo)">🔒 Tela de bloqueio</button>
       <button id="btn-celular" class="so-pc" title="Mostra o QR para conectar o app Android a este PC">📱 Conectar celular</button>
       <button id="btn-tela" title="Tela cheia (F)">⛶</button>
       <span class="vistas"><button class="sel" data-vista="painel">PAINEL</button><button data-vista="mapa">MAPA</button><button data-vista="manutencoes">MANUTENÇÕES</button><button data-vista="clima" id="aba-clima">CLIMA</button><button data-vista="indicadores">INDICADORES</button></span>
@@ -708,6 +709,26 @@ function reforcar() {
 setInterval(reforcar, 30000);
 
 /* ---------- desenho ---------- */
+/* ---------- app Android: painel do plantão na tela de bloqueio ---------- */
+function estadoBloqueio() {
+  const b = $("btn-bloqueio");
+  if (!window.CentroApp || !CentroApp.telaBloqueio) return;  // só no app (versão 11 em diante)
+  let e = {};
+  try { e = JSON.parse(CentroApp.telaBloqueio()); } catch {}
+  b.hidden = false;
+  b.textContent = !e.ativo ? "🔓 Tela de bloqueio: desligada" : e.permissao ? "🔒 Tela de bloqueio: ligada" : "🔒 Tela de bloqueio: toque para permitir";
+  b.dataset.ativo = e.ativo && e.permissao ? "1" : "0";
+}
+$("btn-bloqueio").addEventListener("click", () => {
+  const b = $("btn-bloqueio");
+  let e = {};
+  try { e = JSON.parse(CentroApp.telaBloqueio()); } catch {}
+  CentroApp.ativarTelaBloqueio(!(e.ativo && e.permissao));
+  setTimeout(estadoBloqueio, 300);
+});
+document.addEventListener("visibilitychange", () => { if (!document.hidden) estadoBloqueio(); });
+estadoBloqueio();
+
 /* ---------- status da ocorrência ---------- */
 const STATUS_OC = { aberto: "Em aberto", a_caminho: "🚗 Técnico a caminho", em_atendimento: "👷 Em atendimento", em_tratativa: "⏳ Em tratativa", resolvido: "✔ Resolvido" };
 function seletorStatus(o) {

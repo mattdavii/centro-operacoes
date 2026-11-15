@@ -6,7 +6,9 @@ import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Context;
+import android.content.BroadcastReceiver;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.content.pm.ServiceInfo;
 import android.media.AudioAttributes;
@@ -51,6 +53,18 @@ public class AlertaService extends Service {
     private boolean avisouPcFora = false, avisouWa = false, plantaoAtivo = false;
     private static final long FORA_MS = 10 * 60 * 1000L;  // sem contato por mais que isso vira alarme
     private final long inicioServico = System.currentTimeMillis();
+    // tela acendeu com o plantão ativo e o celular bloqueado: mostra o painel do plantão por cima do bloqueio
+    private final BroadcastReceiver telaAcendeu = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context c, Intent i) {
+            if (!PlantaoBloqueioActivity.podeAbrir(c)) return;
+            try {
+                startActivity(new Intent(c, PlantaoBloqueioActivity.class)
+                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_NO_ANIMATION | Intent.FLAG_ACTIVITY_SINGLE_TOP));
+            } catch (Exception ignorada) {
+            }
+        }
+    };
 
     public static void iniciar(Context c) {
         Intent i = new Intent(c, AlertaService.class);
@@ -72,6 +86,8 @@ public class AlertaService extends Service {
         Notification n = notifMonitor("Conectando ao PC…", null);
         if (Build.VERSION.SDK_INT >= 34) startForeground(ID_MONITOR, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
         else startForeground(ID_MONITOR, n);
+        if (Build.VERSION.SDK_INT >= 33) registerReceiver(telaAcendeu, new IntentFilter(Intent.ACTION_SCREEN_ON), RECEIVER_EXPORTED);
+        else registerReceiver(telaAcendeu, new IntentFilter(Intent.ACTION_SCREEN_ON));
         agenda = Executors.newSingleThreadScheduledExecutor();
         agenda.scheduleWithFixedDelay(this::verificar, 0, 60, TimeUnit.SECONDS);
     }
@@ -84,6 +100,10 @@ public class AlertaService extends Service {
     @Override
     public void onDestroy() {
         if (agenda != null) agenda.shutdownNow();
+        try {
+            unregisterReceiver(telaAcendeu);
+        } catch (Exception ignorada) {
+        }
         super.onDestroy();
     }
 
