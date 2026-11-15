@@ -224,6 +224,9 @@ PARADA_NOME = re.compile(r"^(relig|normaliz|restabelec|reestabelec|desarm|parad|
 
 # ---------- manutenções e técnicos em campo ----------
 ATIVIDADE = re.compile(r"(?<![DdNn]a )(?<![Dd]e )(?<![Dd]o )atividade\s*(conclu[íi]da|finalizada|encerrada|cancelada|adiada)?\s*:\s*([^>*\n]{3,80})", re.I)
+# "⚙️🧰 Atividade no transformador" / "⚙️🟩 Atividade no transformador concluída" (sem dois-pontos)
+ATIVIDADE_EM = re.compile(r"[⚙🧰][^*\n]{0,6}atividade\s+((?:n[oa]s?|em)\s+[^>*\n:]{3,60}?)\s*"
+                          r"(conclu[íi]da|finalizada|encerrada|cancelada|adiada)?\s*(?:\*|>|$)", re.I)
 PRESENCA = re.compile(r"^\s*(entrada|sa[ií]da|chegada)\b\s*(?:(?:da|de|do|em|na|no|as|às|a)\s+)?"
                       r"(\d{1,2}[:h]\d{2})?\s*(?:(?:em|na|no|da|de|do|à|a)\s+)?(.*)$", re.I)
 
@@ -237,6 +240,11 @@ def classificar_manutencao(bruto):
         estado = sem_acento((a.group(1) or "").lower())
         tipo = "atividade_cancelada" if estado in ("cancelada", "adiada") else "atividade_fim" if estado else "atividade_inicio"
         return tipo, a.group(2).strip(" .:*-"), None, None
+    a = ATIVIDADE_EM.search(bruto)
+    if a:
+        estado = sem_acento((a.group(2) or "").lower())
+        tipo = "atividade_cancelada" if estado in ("cancelada", "adiada") else "atividade_fim" if estado else "atividade_inicio"
+        return tipo, "Atividade " + a.group(1).strip(" .:*-"), None, None
     linha = bruto.strip().split("\n")[0]
     p = PRESENCA.match(linha)
     if p and len(linha) <= 90:
@@ -300,6 +308,9 @@ def eh_normalizacao(t):
         antes, depois = f[:m.start()], f[m.end():]
         if f.rstrip().endswith("?") or NEGACAO.search(antes) or INTENCAO.search(antes) or HESITACAO.search(antes):
             continue
+        if re.search(r"\b(precisa|precisam|tem que|tem de|deve estar|devem estar|necessario)\b(?!.*\b(foi|ja)\b)", antes) \
+           or re.match(r"\s*\)?,?\s*senao\b", depois):
+            continue  # condição, não fato: "precisa estar com o lado CA energizado (disjuntor CA fechado), senão..."
         # mensagem mista: um problema relatado DEPOIS da solução desfaz a normalização; o que vem antes é a causa
         # ("disjuntor estava desarmado ... foi fechado")
         pos = t.find(f)
@@ -319,10 +330,59 @@ USINA_TODA = re.compile(r"\b(usina(?!\s*:)|projeto|disjuntor|52l|religador|prote
                         r"parada total|sem geracao|geracao zerad|todos os inversores)\b")
 
 
+# Modelos padronizados do COG. O título (com emoji) diz o que é; a descrição detalha.
+COG_ACOMPANHA = re.compile(r"chamado aberto|contato com o cod|mensagem do provedor|protocolo (consultado|de atendimento)")
+COG_DISPARO = re.compile(r"acionamento\s*[–—-]\s*corretiva|atendimento emergencial em andamento")
+COG_DESCRICAO = re.compile(r"descricao:\s*(.+?)(?=👷|tecnico acionado|nossa equipe|favor confirmar|manteremos|$)")
+COG_OCORRENCIA = re.compile(r"(\S{0,6})🟥\s*ocorrencia:?\s*([^*>]{0,90})")
+COG_RESOLVIDA = re.compile(r"✅\s*ocorrencia|horario d[oe] (rearme|retorno|religamento|fechamento)")
+
+
+def ler_cog(t):
+    """t sem acento. Lê as mensagens padronizadas do COG. Devolve o tipo, ou None se não é um modelo do COG
+    (aí valem as regras gerais)."""
+    if re.match(r"^[*\s]*resumo\s*[-–]", t):
+        return "ignorar"  # lista de pendências da usina (orçamentos, cercas...): não é ocorrência
+    if "🟥" not in t and (re.search(r"[🔌⚙📡]\S{0,3}✅\s*ocorrencia", t)):
+        return "normal"   # "🔌✅ Ocorrência: Disjuntor 52L aberto ... Horário do rearme": já chega resolvida
+    if re.search(r"[🌡♨]\S{0,4}\s*ocorrencia", t) and "🟩" not in t:
+        return "alerta"   # "🌡️♨️ Ocorrência: Inversor limitado para controle de temperatura"
+    oc = COG_OCORRENCIA.search(t)
+    if oc and "🟩" not in t[oc.end():]:
+        emoji, titulo = oc.group(1), oc.group(2)
+        if COG_RESOLVIDA.search(t[oc.end():]):
+            return "normal"
+        if "📡" in emoji or SO_COMUNICACAO.search(titulo) and not GRAVE.search(titulo):
+            return "alerta"  # falha de comunicação: não se sabe se a usina parou
+        if "🌡" in emoji or "♨" in emoji or "limitad" in titulo:
+            return "alerta"
+        if re.search(r"\b(eletrocentro|skid)", titulo):
+            return "critico"  # parte da usina fora
+        if "⚙" in emoji:
+            # inversor: crítica só se todos/vários pararam por falta de energia (a usina caiu)
+            return "critico" if re.search(r"inversores .*falha de energia|todos os inversores", titulo) else "alerta"
+        if "🔌" in emoji:
+            return "critico"
+        return None
+    if COG_DISPARO.search(t):
+        d = COG_DESCRICAO.search(t)
+        desc = d.group(1) if d else re.sub(r".*?(acionamento\s*[–—-]\s*corretiva emergencial|em andamento)\W*", "", t, count=1)
+        if re.search(r"comunicacao total|sem comunicacao total|\b(rearmar|religar|rearme)\b|"
+                     r"inversores .*falha de energia|\b(eletrocentros?|skids?)\b[^.;]*\b(parad|desarm|deslig)", desc):
+            return "critico"  # usina inteira muda e técnico despachado em emergência: tratar como parada até confirmar
+        return classificar(desc) if classificar(desc) in ("critico", "alerta") else "alerta"
+    if COG_ACOMPANHA.search(t) and "🟥" not in t and "🟩" not in t:
+        return "acompanha"  # chamado na concessionária, contato com o COD/provedor: segue a ocorrência, não muda a gravidade
+    return None
+
+
 def classificar(t):
-    """t já sem acento. Devolve 'normal', 'critico', 'alerta', 'boletim' ou None."""
+    """t já sem acento. Devolve 'normal', 'critico', 'alerta', 'boletim', 'acompanha' ou None."""
     if BOLETIM.search(t):
         return "boletim"
+    cog = ler_cog(t)
+    if cog:
+        return None if cog == "ignorar" else cog
     if PROGRAMADA.search(t) and "🟥" not in t.split("atividade", 1)[0]:
         return None
     if "🟩" in t and t.rfind("🟩") > t.rfind("🟥"):
@@ -452,7 +512,8 @@ def operacao(chat, dados, agora=None, janela=None):
               "tecnico": (TECNICO.search(bruto).group(1) if TECNICO.search(bruto) else None),
               "generico": not cod and not de_uma_usina and chave == chat["jid"],
               "motivo": ("cog" if NORMAL_COG.search(t) else "mensagem") if tipo == "normal" else None,
-              "so_comunicacao": tipo == "normal" and so_comunicacao(t)}
+              "so_comunicacao": tipo == "normal" and so_comunicacao(t),
+              "so_inversor": tipo == "normal" and bool(re.search(r"normalizacao:\s*inversor", t))}
         if tipo == "boletim":
             ev["completo"] = (m.get("text") or bruto).replace("*", "")[:3000]  # texto original, com as quebras de linha
         eventos.append(ev)
@@ -532,7 +593,7 @@ def montar_ocorrencias(eventos, usinas, vinculos=None):
         e["chave_usina"] = resolvidos[citada]
     ocorrencias, abertas, boletins = [], {}, []
     for e in sorted(eventos, key=lambda e: e["ts"]):
-        if e["tipo"] not in ("critico", "alerta", "normal", "boletim"):
+        if e["tipo"] not in ("critico", "alerta", "normal", "boletim", "acompanha"):
             continue  # atividades e entrada/saída: montar_manutencoes
         k = e["chave_usina"]
         if e["tipo"] == "boletim":
@@ -547,7 +608,22 @@ def montar_ocorrencias(eventos, usinas, vinculos=None):
                 continue  # ninguém, ou mais de uma ocorrência com esse técnico: não dá para saber qual fechar
             k = alvo[0]["chave_usina"]
         o = abertas.get(k)
+        if e["tipo"] == "acompanha":
+            # chamado na concessionária, contato com o COD/provedor: anexa à ocorrência aberta, sem mudar a gravidade
+            if o and not o["normalizado"]:
+                o["ultima_ts"] = e["ts"]
+                o["qtd"] += 1
+                o["grupos"] = sorted(set(o["grupos"]) | {e["grupo"]})
+                o["jids"] = sorted(set(o["jids"]) | {e["jid"]})
+                o["ids"].append(e["id"])
+                o["ultimo_msg"] = e["msg"]
+                continue
+            if not re.search(r"falta de energia|sem energia|desarm", sem_acento(e["msg"]["texto"])):
+                continue  # sem ocorrência aberta e sem dizer que a usina está fora: só registro
+            e = dict(e, tipo="critico")
         if e["tipo"] == "normal":
+            if o and not o["normalizado"] and e.get("so_inversor") and o["niveis"] and o["niveis"][-1][1] == "critico":
+                continue  # um inversor voltou, mas a usina desarmada não foi dada como religada
             if o and not o["normalizado"] and o["sev"] == "critico" and e.get("so_comunicacao"):
                 continue  # voltou a comunicação, mas a usina desarmada não foi dada como religada
             if o and not o["normalizado"]:

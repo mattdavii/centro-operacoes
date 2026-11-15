@@ -4,6 +4,8 @@ import os, sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import coletor
 
+erros = 0
+
 DA_BAIXA = [
     "*UFV GOY700 – GOY700* *🔌🟩 Normalização: Disjuntor 52L Fechado* > Proteção atuada: em análise",
     "* *UFV RIO100 – L'oreal RJ* *🔌🟩 Normalização: Usina restabelecida* > Horário de restabelecimento: 15h05min",
@@ -28,6 +30,7 @@ DA_BAIXA = [
     "* *UFV QSS100 – Quissamã 100* *🔌🟥 Ocorrência: Disjuntor 52L aberto* > Proteções atuadas: > • 27 (Subtensão) > Horário do desarme: 18h26min *🔌🟩 Normalização: Disjuntor 52L Fechado* > Horário de fechamento: 19h02min",
 ]
 NAO_DA_BAIXA = [
+    "o inversor precisa estar com o lado CA energizado (disjuntor CA fechado), senão o MBUS não fala.",
     "inversor 3 ainda não está em operação",
     "vamos verificar se está ok",
     "confirmou que estava ok antes do desarme, agora está parado",
@@ -64,6 +67,22 @@ for frase, nivel in [
     ("*ACIONAMENTO – CORRETIVA EMERGENCIAL* Usina: UFV ABC100 – X Descrição: Inversor 06 parado com alarme de baixa R.I", "alerta"),
     ("*ACIONAMENTO – CORRETIVA EMERGENCIAL* Usina: UFV ABC100 – X Descrição: Usina desarmada, disjuntor 52L aberto", "critico"),
     ("Usina desarmou por sobretensão", "critico"),
+    # modelos padronizados do COG
+    ("*UFV ABC100 – X* *🔌🟥 Ocorrência: Disjuntor 52L aberto* > Proteção atuada: 46 > Horário do desarme: 05h53min", "critico"),
+    ("*UFV ABC100 – X* *📡🟥 Ocorrência: Falha de comunicação* > Usina sem comunicação > Técnico será direcionado", "alerta"),
+    ("*UFV ABC100 – X* *⚙️🟥 Ocorrência: Inversor parado* > Inversor: 10 > Alarme: Fusível da Fase A aberto", "alerta"),
+    ("*UFV ABC100 – X* *⚙️🟥 Ocorrência: Inversores parados com alarme de falha de energia* > Horário da parada: 17h42min", "critico"),
+    ("*UFV ABC100 – X* *🌡️♨️ Ocorrência: Inversor limitado para controle de temperatura* > Inversor 01 a 120 kW", "alerta"),
+    ("*UFV ABC100 – X* *🔌✅ Ocorrência: Disjuntor 52L aberto* > Horário do desarme: 15h00min > Horário do rearme : 15h05min", "normal"),
+    ("*UFV ABC100 – X* *⚙️🟩 Normalização: Inversor em operação* > Inversor: 10", "normal"),
+    ("*UFV ABC100 – X* *⚡📝 Chamado aberto* > Concessionária: Copel > Aberto chamado referente a: Falta de energia", "acompanha"),
+    ("*UFV ABC100 – X* *📞🗣️ Contato com o COD: Informação da linha* > Estamos acompanhando", "acompanha"),
+    ("*UFV ABC100 – X* *📡🛜🗣️🗣️ Mensagem do provedor* > técnicos a caminho", "acompanha"),
+    ("*🚨 Atendimento Emergencial em Andamento* Identificamos uma ocorrência na UFV ABC100 – X. 🆔 OS: 1 🔎 Descrição: Usina em falha de comunicação total - Necessário validar 👷 Nossa equipe técnica já foi acionada", "critico"),
+    ("*🚨 ACIONAMENTO – CORRETIVA EMERGENCIAL* 📍 Usina: UFV ABC100 – X 🔎 Descrição: Rearmar usina 👷 Técnico acionado: Fulano", "critico"),
+    ("*🚨 ACIONAMENTO – CORRETIVA EMERGENCIAL* 📍 Usina: UFV ABC100 – X 🔎 Descrição: Eletrocentros 1,3 e 4 parados. 👷 Técnico acionado: Fulano", "critico"),
+    ("*🚨 ACIONAMENTO – CORRETIVA EMERGENCIAL* 📍 Usina: UFV ABC100 – X 🔎 Descrição: Trackers fora de posição 👷 Técnico acionado: Fulano", "alerta"),
+    ("*RESUMO - UFV X* * Inversores 2 e 3, com potência reduzida * Nobreak da Cabine com problema", None),
     ("*🚨 ACIONAMENTO – CORRETIVA EMERGENCIAL* Usina em falha de comunicação total, inversor sem dados", "critico"),
 ]:
     if coletor.classificar(coletor.sem_acento(frase)) != nivel:
@@ -83,7 +102,6 @@ E_OCORRENCIA = [
     "Usina continua desligada, técnico vai amanhã",
 ]
 
-erros = 0
 for t in DA_BAIXA:
     if coletor.classificar(coletor.sem_acento(t)) != "normal":
         erros += 1
@@ -130,6 +148,8 @@ for frase, esperado in [
     ("Entrada UFV PTY 100 13:02 Ryan", ("entrada", None, "13:02", "PTY 100")),
     ("Saída de corrente do inversor 3 zerada", None),
     ("*UFV GOY100* > Trackers liberados > Horário de término da atividade: 17h22min", None),
+    ("*UFV ABC200 – X* *⚙️🧰 Atividade no transformador* > Inversores desligados", ("atividade_inicio", "Atividade no transformador", None, None)),
+    ("*UFV ABC200 – X* *⚙️🟩 Atividade no transformador concluída* > Horário de término", ("atividade_fim", "Atividade no transformador", None, None)),
 ]:
     if coletor.classificar_manutencao(frase) != esperado:
         erros += 1
