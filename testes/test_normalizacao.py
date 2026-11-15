@@ -24,12 +24,16 @@ DA_BAIXA = [
     "Pode encerrar a OS 5688, usina comunicando",
     "OS 5690 finalizada",
     "Normalizado",
+    "agora normalizou.",
+    "agora reestabeleu.",
+    "Tracker normalizados",
     "*UFV ABC200 – Usina 2* > Com auxilio da vigilância novamente, constatamos que os inversores estão em operação",
     "a vigilância confirmou que estava ok",
     "@COG foi identificado o dinjuntor do padrão de entrada desarmado ( em trip) após as devidas verificações nada de anormal foi constatado disjuntor foi fechado",
     "* *UFV QSS100 – Quissamã 100* *🔌🟥 Ocorrência: Disjuntor 52L aberto* > Proteções atuadas: > • 27 (Subtensão) > Horário do desarme: 18h26min *🔌🟩 Normalização: Disjuntor 52L Fechado* > Horário de fechamento: 19h02min",
 ]
 NAO_DA_BAIXA = [
+    "esta normalizando por aqui",
     "o inversor precisa estar com o lado CA energizado (disjuntor CA fechado), senão o MBUS não fala.",
     "inversor 3 ainda não está em operação",
     "vamos verificar se está ok",
@@ -67,6 +71,13 @@ for frase, nivel in [
     ("*ACIONAMENTO – CORRETIVA EMERGENCIAL* Usina: UFV ABC100 – X Descrição: Inversor 06 parado com alarme de baixa R.I", "alerta"),
     ("*ACIONAMENTO – CORRETIVA EMERGENCIAL* Usina: UFV ABC100 – X Descrição: Usina desarmada, disjuntor 52L aberto", "critico"),
     ("Usina desarmou por sobretensão", "critico"),
+    # COG de cliente (Élis), casos reais
+    ("Bom dia! estamos com os Trackers 39 , 57 e 60 fora de posição , já realizamos resets , mas não normalizou, necessário verificação In loco.", "alerta"),
+    ("não estamos conseguindo acessar a NCU 02, necessário verificação In loco. Iremos gerar ordem de serviço", "alerta"),
+    ("boa tarde, estamos com o inv 3.1 fora de operação, poderiam verificar por gentileza?", "alerta"),
+    ("Estamos com um desligamento automático da UFV X I por atuação do 59N.", "critico"),
+    ("bom dia, pessoal estamos com a ufv 02 desligada, poderiam verificar por gentileza?", "critico"),
+    ("UFV desligada devido tensão alta, peço que seja feita verificação In loco.", "critico"),
     # modelos padronizados do COG
     ("*UFV ABC100 – X* *🔌🟥 Ocorrência: Disjuntor 52L aberto* > Proteção atuada: 46 > Horário do desarme: 05h53min", "critico"),
     ("*UFV ABC100 – X* *📡🟥 Ocorrência: Falha de comunicação* > Usina sem comunicação > Técnico será direcionado", "alerta"),
@@ -88,6 +99,12 @@ for frase, nivel in [
     if coletor.classificar(coletor.sem_acento(frase)) != nivel:
         erros += 1
         print("✗ gravidade:             ", frase, "→", coletor.classificar(coletor.sem_acento(frase)), "(esperado", nivel + ")")
+# nomes de usina: uma palavra só em comum não basta
+for x, y, igual in [("UFV S. LUIS M. BELOS 2/GO", "Luís Eduardo Magalhães", False), ("Paty dos Alferes 100", "UFV Paty do Alferes", True),
+                    ("UFV S. LUIS M. BELOS 1/GO", "São Luís de Montes Belos 1", True), ("UFV CONCÓRDIA", "Concórdia do Pará", True)]:
+    if coletor.mesma_usina(coletor.assinatura(x), coletor.assinatura(y)) != igual:
+        erros += 1
+        print("✗ mesma usina:           ", x, "×", y)
 # "Usina Itaperuna" (sem "UFV") também identifica a usina
 for frase, nome in [("Identificamos uma ocorrência na Usina Itaperuna. 🆔 OS: 5697", "Itaperuna"),
                     ("Usina desarmada por sobretensão", None)]:

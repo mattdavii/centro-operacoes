@@ -120,12 +120,16 @@ CRITICO = re.compile(
     r"desarm|\btrip\b|tripou|disparou|usina (parada|caiu|desligou|fora)|parada total|sem geracao|geracao zerad|"
     r"zerou a geracao|incendio|\bfogo\b|fumaca|explos|curto[- ]?circuito|acidente|choque eletrico|emergencia|"
     r"falta de energia|apagao|religador (abriu|atuou|desarmou)|disjuntor (geral )?(abriu|atuou|desarmou)|"
-    r"protecao (atuou|atuada)|rele (atuou|atuado)|bloqueio da protecao")
+    r"protecao (atuou|atuada)|rele (atuou|atuado)|bloqueio da protecao|desligamento automatico|"
+    r"atuacao d[oa] (rele|protecao|funcao|\d{2}\w?\b)|"
+    r"\b(usina|ufv)\s*(0?\d{1,2}|[ivx]{1,3})?\s+(esta\s+|ficou\s+|foi\s+|permanece\s+)?(desligad|desarmad|fora do ar\b)")
 ALERTA = re.compile(
     r"alarme|alarmando|\bfalha|\berro\b|sem comunicacao|perda de comunicacao|comunicacao (caiu|parou|oscilando)|"
     r"\boffline\b|fora do ar|inversor(es)? (parad|deslig|com falha|em falha|off\b)|sobretemperatura|superaquec|"
     r"temperatura (alta|elevada)|baixa (geracao|performance)|\bdefeito|anomalia|\burgente|queimad|queimou|"
-    r"\bparad[oa]s?\b|desligad[oa]")
+    r"\bparad[oa]s?\b|desligad[oa]|fora de (posicao|operacao)|nao (esta )?aceitando comando|\btravad[oa]|"
+    r"(nao|sem) (estamos )?conseguindo (acessar|visualizar|comunicar)|\bsem acesso\b|sem supervisao|p\w?rdemos a supervisao|"
+    r"bateria (fraca|em 0|descarregad)|necessario (a )?verificac\w* in loco|verificacao in loco")
 NORMAL = re.compile(
     r"normaliza|restabelec|reestabelec|\bvoltou\b|voltaram|retornou|retornaram|resolvid|religad|religamento|"
     r"operando normal|em operacao normal|ja (esta|estao) (gerando|operando)|gerando normal|disjuntor (52l )?fechado")
@@ -169,9 +173,12 @@ def assinatura(nome):
 
 
 def mesma_usina(a, b):
+    """Mesma usina se as palavras do nome menor estão todas no maior (ou se dividem 2+ palavras), e os números
+    batem. Uma palavra só em comum não basta: "S. LUIS M. BELOS" não é "Luís Eduardo Magalhães"."""
     pa, na = a
     pb, nb = b
-    return bool(pa & pb) and (not na or not nb or bool(na & nb))
+    comum = pa & pb
+    return bool(comum) and (len(comum) >= min(len(pa), len(pb)) or len(comum) >= 2) and (not na or not nb or bool(na & nb))
 
 
 # ---------- normalização: só aceita fato consumado ----------
@@ -184,7 +191,7 @@ FIM_OS = re.compile(r"\b(pode|pd|podem|pode-se)\s+(encerrar|encerra|fechar|final
 TECNICO = re.compile(r"T[ée]cnico acionado:\s*([A-ZÀ-Ú][\wÀ-ú]+(?:\s+[A-ZÀ-Ú][\wÀ-ú]+)?)")
 NORMAL_FATO = re.compile(
     r"\b(disjuntor|chave|religador|protecao)\b[^.?!]{0,40}\b(foi |ja foi |ja esta )?(fechad|rearmad|religad)\w*|\bfoi fechad[oa]\b|"
-    r"\b(normalizad[oa]s?|restabelecid[oa]s?|reestabelecid[oa]s?|religad[oa]s?|rearmad[oa]s?)\b|"
+    r"\b(normalizad[oa]s?|normalizou|normalizaram|restabelecid[oa]s?|reestabelecid[oa]s?|restabeleceu|reestabele\w*|religad[oa]s?|rearmad[oa]s?)\b|"
     r"\b(voltou|voltaram|retornou|retornaram)\b(?! a (falhar|cair|desarmar|alarmar))|"
     r"\b(ja )?(esta|estao|segue|seguem) (gerando|operando|comunicando|normal)\b|"
     r"\bgerando normal|\boperando normal|"
