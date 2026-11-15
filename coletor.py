@@ -425,6 +425,7 @@ def eh_normalizacao(t):
 
 # andamento da ocorrência (status automático), lido nas mensagens dos grupos da usina depois do primeiro aviso
 STATUS_CAMINHO = re.compile(r"\b(em deslocamento|deslocando|deslocaremos|me deslocando|a caminho|estou indo|estamos indo|"
+                            r"tecnico (sera|foi) (direcionado|deslocado|acionado)|direcionaremos|"
                             r"indo (para|pra) (a |o )?(usina|ufv|local|projeto)|saindo (agora )?(para|pra) (a |o )?(usina|ufv)|"
                             r"comecando o deslocamento|tecnico acionado:|acionamento\s*[–—-]\s*corretiva)")
 STATUS_ATENDIMENTO = re.compile(r"\b(verificando|em atendimento|cheguei|chegamos|no local|"
@@ -445,12 +446,39 @@ def chave_codigo(c):
     return m.group(1) + m.group(2) if m else None
 
 
-def status_da_mensagem(t):
-    """t sem acento. 'a_caminho', 'em_atendimento', 'em_tratativa' ou None. Pergunta não conta."""
+COG_REMETENTE = re.compile(r"\bcog\b|centro (de )?operac")
+COG_VALIDANDO = re.compile(r"\b(verificando|validando|analisando|acompanhando)\b|\bem analise\b|estamos em contato|"
+                           r"aguardando (o )?(retorno|normalizacao)|normalizando por aqui|\b(iremos|vamos) verificar|verificaremos")
+COG_REMOTO = re.compile(r"\bremot[ao]\w*|\bremotamente\b|pelo cog\b|pelo centro de operac")
+COG_EM_CAMPO = re.compile(r"\btecnic|\bem campo\b|\bin[- ]?loco\b|\blocalmente\b|\bfechamento local\b|\bno local\b")
+
+
+def eh_cog(remetente):
+    return bool(COG_REMETENTE.search(sem_acento(remetente or "")))
+
+
+def resolvido_pelo_cog(o):
+    """A normalização foi feita pelo próprio COG, sem técnico (rearme, fechamento ou reinício remoto)?"""
+    n = o.get("normalizado") or {}
+    if n.get("motivo") in ("manual", "inatividade", "sem_registro") or not eh_cog(n.get("de")):
+        return False
+    t = sem_acento(n.get("texto") or "")
+    if COG_REMOTO.search(t):
+        return True
+    return not o.get("visitas") and not COG_EM_CAMPO.search(t)
+
+
+def status_da_mensagem(t, de_cog=False):
+    """t sem acento. 'a_caminho', 'em_atendimento', 'em_tratativa', 'cog_validando' ou None. Pergunta não conta."""
     if t.rstrip().endswith("?"):
         return None
     if STATUS_TRATATIVA.search(t):
         return "em_tratativa"
+    if de_cog:
+        # o COG não está na usina: "verificando" dele é validação remota; despacho de técnico é "a caminho"
+        if STATUS_CAMINHO.search(t):
+            return "a_caminho"
+        return "cog_validando" if COG_VALIDANDO.search(t) else None
     if STATUS_ATENDIMENTO.search(t):
         return "em_atendimento"
     if STATUS_CAMINHO.search(t):

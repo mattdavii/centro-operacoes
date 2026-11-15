@@ -109,6 +109,20 @@ for frase, st in [("Em deslocamento para UFV X", "a_caminho"), ("*🚨 ACIONAMEN
     if coletor.status_da_mensagem(coletor.sem_acento(frase)) != st:
         erros += 1
         print("✗ status:                ", frase, "→", coletor.status_da_mensagem(coletor.sem_acento(frase)))
+# COG validando (remetente do COG) e resolvido pelo COG (sem técnico)
+for frase, cog, st in [("*UFV X* *🔌🟥 Ocorrência: Disjuntor 52L aberto* > Estamos verificando", True, "cog_validando"),
+                       ("estamos acompanhando.", True, "cog_validando"), ("Verificando", True, "cog_validando"),
+                       ("Verificando", False, "em_atendimento"), ("Técnico acionado: Fulano", True, "a_caminho")]:
+    if coletor.status_da_mensagem(coletor.sem_acento(frase), cog) != st:
+        erros += 1
+        print("✗ status COG:            ", frase, "→", coletor.status_da_mensagem(coletor.sem_acento(frase), cog))
+for texto, visitas, esperado in [("Normalização: Disjuntor 52L Fechado > foi realizado o fechamento remoto do disjuntor", None, True),
+                                 ("Normalização: Disjuntor 52L Fechado > foi realizado o fechamento local do disjuntor pelo técnico de campo", None, False),
+                                 ("Normalização: Disjuntor 52L Fechado", ["Fulano 15/11 08:00"], False)]:
+    o = {"normalizado": {"de": "Centro Operação Gera", "texto": texto, "motivo": "cog"}, "visitas": visitas}
+    if coletor.resolvido_pelo_cog(o) != esperado:
+        erros += 1
+        print("✗ resolvido pelo COG:    ", texto)
 # nomes de usina: uma palavra só em comum não basta
 for x, y, igual in [("UFV S. LUIS M. BELOS 2/GO", "Luís Eduardo Magalhães", False), ("Paty dos Alferes 100", "UFV Paty do Alferes", True),
                     ("UFV S. LUIS M. BELOS 1/GO", "São Luís de Montes Belos 1", True), ("UFV CONCÓRDIA", "Concórdia do Pará", True)]:

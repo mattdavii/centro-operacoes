@@ -58,7 +58,7 @@ def resumo_celular(p):
     ativas = [o for o in abertas if o.get("status") != "em_tratativa"]
     ordem = {"critico": 0, "alerta": 1}
     ativas.sort(key=lambda o: (ordem.get(o["sev"], 2), -o["ultima_ts"]))
-    rot = {"aberto": "em aberto", "a_caminho": "técnico a caminho", "em_atendimento": "em atendimento"}
+    rot = {"aberto": "em aberto", "cog_validando": "COG validando", "a_caminho": "técnico a caminho", "em_atendimento": "em atendimento"}
     linhas = [("🔴 " if o["sev"] == "critico" else "🟡 ") + coletor.rotulo_usina(o["usina"])[:28] + " · " + rot.get(o.get("status"), "em aberto")
               for o in ativas[:4]]
     if len(ativas) > 4:
@@ -225,8 +225,9 @@ def acoes_por_mensagem(acoes):
     return out
 
 
-STATUS = {"aberto": "Em aberto", "a_caminho": "Técnico a caminho", "em_atendimento": "Em atendimento",
-          "em_tratativa": "Em tratativa", "resolvido": "Resolvido"}
+STATUS = {"aberto": "Em aberto", "cog_validando": "COG validando", "a_caminho": "Técnico a caminho",
+          "em_atendimento": "Em atendimento", "em_tratativa": "Em tratativa", "resolvido": "Resolvido",
+          "resolvido_cog": "Resolvido pelo COG"}
 TRATATIVA_PERGUNTA = 24 * 3600  # em tratativa: pergunta se continua só depois de 24 h sem novidade
 
 
@@ -259,7 +260,7 @@ def status_automatico(o, presencas, jids_usina):
                 continue
             t = coletor.sem_acento(coletor.texto(m))
             oss.update(OS_NUM.findall(coletor.texto(m)))
-            st = coletor.status_da_mensagem(t)
+            st = coletor.status_da_mensagem(t, coletor.eh_cog(m.get("sender")))
             if st:
                 quem = "você" if m.get("sender") == "me" else (m.get("sender") or "?")
                 sinais.append((m["ts"], st, f"{quem}: {coletor.texto(m)[:120]}"))
@@ -278,7 +279,12 @@ def aplicar_status(ocorrencias, presencas, acoes, usinas):
             if not o.get("os_lidas"):  # OS e visitas, uma vez, para o Diário de Bordo
                 status_automatico(o, presencas, jids_usina)
                 o["os_lidas"] = True
-            o["status"], o["status_origem"], o["status_motivo"] = "resolvido", "auto", None
+            manual = acoes.get("st:" + o["chave"])
+            if manual and manual.get("status") in ("resolvido", "resolvido_cog"):
+                o["status"], o["status_origem"], o["status_motivo"] = manual["status"], "manual", None
+            else:
+                o["status"] = "resolvido_cog" if coletor.resolvido_pelo_cog(o) else "resolvido"
+                o["status_origem"], o["status_motivo"] = "auto", None
             continue
         manual = acoes.get("st:" + o["chave"])
         for mid in o.get("ids") or []:
@@ -868,8 +874,11 @@ class Pagina(http.server.BaseHTTPRequestHandler):
                     st = corpo.get("status")
                     if st not in STATUS:
                         return self.responder(400, {"erro": "status inválido"})
-                    if st == "resolvido":
-                        acoes["enc:" + chave] = {"tipo": "encerrar", "ts": int(time.time()), "nota": str(corpo.get("nota", ""))[:200], "ids": ids}
+                    if st in ("resolvido", "resolvido_cog"):
+                        nota = str(corpo.get("nota", ""))[:200] or ("resolvido pelo COG" if st == "resolvido_cog" else "")
+                        if not (atual or {}).get("normalizado"):
+                            acoes["enc:" + chave] = {"tipo": "encerrar", "ts": int(time.time()), "nota": nota, "ids": ids}
+                        acoes["st:" + chave] = {"tipo": "status", "status": st, "ts": int(time.time()), "ids": ids}
                     else:
                         if (atual or {}).get("normalizado") or ("enc:" + chave) in acoes:
                             acoes.pop("enc:" + chave, None)  # voltar de "resolvido" reabre a ocorrência

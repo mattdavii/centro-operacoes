@@ -208,7 +208,9 @@
   .st-sel.st-a_caminho { background: #0f3550; color: #9fdcff; border-color: #1f6a96; }
   .st-sel.st-em_atendimento { background: #2a2158; color: #d6c8ff; border-color: #5a47b0; }
   .st-sel.st-em_tratativa { background: #3d3108; color: #fde68a; border-color: #8a6d00; }
-  .st-sel.st-resolvido { background: #0b2a1d; color: #bbf7d0; border-color: #1e7a4c; }
+  .st-sel.st-resolvido, .st-sel.st-resolvido_cog { background: #0b2a1d; color: #bbf7d0; border-color: #1e7a4c; }
+  .st-sel.st-cog_validando { background: #10343a; color: #a5f3fc; border-color: #1b7a86; }
+  .tag.cog-ok { color: #bbf7d0; background: #0b3a26; }
   .st-sel option { background: #0b1226; color: #e6edff; }
   .st-motivo { font-size: 11px; color: var(--fraco); margin-top: 2px; }
   .painel.tratativa { border-color: #5c4a00; } .painel.tratativa > h2 { color: #fde68a; }
@@ -730,9 +732,10 @@ document.addEventListener("visibilitychange", () => { if (!document.hidden) esta
 estadoBloqueio();
 
 /* ---------- status da ocorrência ---------- */
-const STATUS_OC = { aberto: "Em aberto", a_caminho: "🚗 Técnico a caminho", em_atendimento: "👷 Em atendimento", em_tratativa: "⏳ Em tratativa", resolvido: "✔ Resolvido" };
+const STATUS_OC = { aberto: "Em aberto", cog_validando: "🖥️ COG validando", a_caminho: "🚗 Técnico a caminho", em_atendimento: "👷 Em atendimento",
+  em_tratativa: "⏳ Em tratativa", resolvido: "✔ Resolvido", resolvido_cog: "✔ Resolvido pelo COG" };
 function seletorStatus(o) {
-  const st = o.normalizado ? "resolvido" : (o.status || "aberto");
+  const st = o.normalizado ? (o.status === "resolvido_cog" ? "resolvido_cog" : "resolvido") : (o.status || "aberto");
   const dica = o.normalizado ? "Resolvida" : o.status_origem === "manual" ? "Definido por você no painel" + (o.status_ts ? " às " + hm(o.status_ts) : "")
     : o.status_motivo ? "Automático: " + o.status_motivo : "Ninguém avisou andamento ainda";
   return `<select class="st-sel st-${st}" data-status-oc="${esc(o.chave)}" title="${esc(dica)}">${Object.entries(STATUS_OC).map(([k, v]) => `<option value="${k}"${k === st ? " selected" : ""}>${v}</option>`).join("")}</select>`;
@@ -741,7 +744,7 @@ document.addEventListener("change", async ev => {
   const s = ev.target.closest("[data-status-oc]"); if (!s) return;
   const chave = s.dataset.statusOc, st = s.value;
   let nota = "";
-  if (st === "resolvido") { nota = prompt("Resolvida. Observação (opcional):", ""); if (nota === null) { desenhar(); return; } }
+  if (st === "resolvido" || st === "resolvido_cog") { nota = prompt(st === "resolvido_cog" ? "Resolvido pelo COG. Observação (opcional):" : "Resolvida. Observação (opcional):", ""); if (nota === null) { desenhar(); return; } }
   s.disabled = true;
   const r = await post("/api/acao", { chave, tipo: "status", status: st, nota });
   if (r && r.pronto !== undefined) { dados = r; desenhar(); if (ocAberta === chave) abrirDetalhe(chave); }
@@ -907,7 +910,7 @@ function desenhar() {
       <div class="barra"></div>
       <div style="min-width:0">
         <div class="topo"><span class="usina">${esc(nomeUsina(o))}</span>${o.codigo && !o.usina.startsWith(o.codigo) ? `<span class="tag">${esc(o.codigo)}</span>` : ""}
-          <span class="sev">${o.normalizado ? motivoBaixa(o) : o.sev === "critico" ? "CRÍTICA" : "ALERTA"}</span>${o.normalizado ? "" : seletorStatus(o)}
+          <span class="sev">${o.normalizado ? motivoBaixa(o) : o.sev === "critico" ? "CRÍTICA" : "ALERTA"}</span>${o.normalizado ? (o.status === "resolvido_cog" ? `<span class="tag cog-ok" title="Normalizada pelo próprio COG, sem técnico (rearme, fechamento ou reinício remoto)">RESOLVIDO PELO COG</span>` : "") : seletorStatus(o)}
           ${o.era_critica && !o.normalizado ? `<span class="tag" title="Começou como crítica; os avisos mais recentes são só de alerta">ERA CRÍTICA</span>` : ""}
           ${o.qtd > 1 ? `<span class="tag">${o.qtd} AVISOS</span>` : ""}${o.ciente ? `<span class="tag">CIENTE</span>` : ""}
           ${o.durante_manutencao ? `<span class="tag manut" title="Começou com uma manutenção em andamento na usina">🔧 DURANTE MANUTENÇÃO: ${esc(o.durante_manutencao.descricao).toUpperCase()}</span>` : ""}

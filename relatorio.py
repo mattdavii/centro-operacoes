@@ -239,8 +239,8 @@ table.diario td,table.diario th{{font-size:11px}} h2.diario-t button{{font-size:
     return pagina, texto
 
 
-STATUS_TXT = {"aberto": "em aberto", "a_caminho": "técnico a caminho", "em_atendimento": "em atendimento",
-              "em_tratativa": "em tratativa"}
+STATUS_TXT = {"aberto": "em aberto", "cog_validando": "COG validando", "a_caminho": "técnico a caminho",
+              "em_atendimento": "em atendimento", "em_tratativa": "em tratativa"}
 
 
 # ---- Diário de Bordo do sobreaviso: as mesmas colunas da planilha, para copiar e colar ----
@@ -269,8 +269,10 @@ def _o_que_houve(o):
 
 def _status_diario(o):
     st = o.get("status") or ("resolvido" if o.get("normalizado") else "aberto")
-    if st == "resolvido":
+    if st in ("resolvido", "resolvido_cog"):
         return "Concluído"
+    if st == "cog_validando":
+        return "Aguardando validação"
     if st in ("a_caminho", "em_atendimento"):
         return "Em atendimento"
     if st == "em_tratativa":
@@ -353,6 +355,8 @@ def linha_diario(o, n):
         feitas.append(f"Encerrada no painel {_hora(norm['ts'])}" + (f": {_limpo(nota, 120)}" if nota else ""))
     elif norm and norm.get("motivo") in ("inatividade", "sem_registro"):
         feitas.append(f"Sem confirmação de normalização nos grupos (sem novidade desde {_hora(o.get('ultima_ts') or norm['ts'])})")
+    elif norm and o.get("status") == "resolvido_cog":
+        feitas.append(f"Resolvido pelo COG {_hora(norm['ts'])}: {_limpo(norm.get('texto'), 140)}")
     elif norm:
         feitas.append(f"Normalizada {_hora(norm['ts'])} ({norm.get('de') or ''}): {_limpo(norm.get('texto'), 140)}")
     elif o.get("status_motivo") and o.get("status") in ("a_caminho", "em_atendimento") and o.get("status_origem") != "manual":
