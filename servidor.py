@@ -453,6 +453,11 @@ def ocorrencias_com_acoes(d, acoes):
         if not u.get("codigo"):
             ass = coletor.assinatura(u["nome"])
             u["codigo"] = next((c for c, a in conhecidos if coletor.mesma_usina(ass, a)), None)
+        if not u.get("codigo"):
+            try:  # grupo que o COG nunca citou com código (Élis, Mucugê): pela sigla da cidade no KMZ
+                u["codigo"] = clima.codigo_kmz(u["nome"])
+            except Exception:
+                pass
     por_jid = {u["jid"]: u.get("codigo") for u in usinas}
     for o in ocorrencias:
         if not o.get("codigo"):

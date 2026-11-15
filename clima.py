@@ -247,10 +247,11 @@ def cidade_de(o):
         return None, None  # grupo geral sem usina identificada
     nome = re.sub(r"\s+Gerar\s*$", "", str(o.get("usina") or ""))
     nome = re.sub(r"^[^-–]{2,20}\s[-–]\s(?=UFV)", "", nome)  # "ÉLIS - UFV MORRINHOS/GO"
-    m = re.search(r"[-–/\s]\s*([A-Z]{2})\s*$", nome)
-    uf = m.group(1) if m and m.group(1) in UFS else None
+    m = next((x for x in (re.search(r"[-–/\s]\s*([A-Z]{2})\s*$", nome), re.search(r"\s*[-–]\s*([A-Z]{2})\b(?=\s)", nome))
+              if x and x.group(1) in UFS), None)  # no fim ("Mucugê-BA") ou no meio ("Anguera-BA IB/IC")
+    uf = m.group(1) if m else None
     if uf:
-        nome = nome[:m.start()]
+        nome = nome[:m.start()]  # "UFV Anguera-BA IB/IC" → "UFV Anguera"
     nome = nome.split(" / ")[0]  # "Vassouras / Corcovado"
     if re.search(r"[a-zà-ú]", nome):
         nome = re.sub(r"\b[A-Z]{2,4}\b", " ", nome)  # sigla no meio de nome normal: "Itaperuna IPN"
@@ -306,6 +307,53 @@ def chave_local(o):
     if cod and extras[chave] and re.fullmatch(r"[A-Z]{2,4}\d{3}(/[A-Z]{0,4}\d{3})*", str(cod)):
         _apelidos.setdefault(chave, set()).update(x.strip() for x in str(cod).split("/"))
     return chave if extras[chave] else None
+
+
+def codigo_kmz(nome):
+    """Código do KMZ de um grupo de usina que o COG nunca citou com código ("ÉLIS - UFV JATAÍ/GO" → JAT100,
+    "UFV Mucugê-BA" → MUC100, "UFV JUSSARA 2/GO" → JUS200, "S. LUIS M. BELOS 1" → SLM100). Só liga quando a cidade
+    já foi localizada e o ponto do KMZ fica perto dela (até ~70 km); a cidade ainda não localizada entra na fila
+    da próxima atualização. None se não der para ter certeza."""
+    import re
+    cidade, uf = cidade_de({"usina": nome})
+    if not cidade:
+        return None
+    us = _ler().get("usinas") or {}
+    chave = "cidade:" + _sa(cidade).title() + ("|" + uf if uf else "")
+    extras = _ler().get("extras") or {}
+    if chave not in extras:
+        _pendentes.setdefault(chave, (cidade, uf))
+        return None
+    loc = extras[chave]
+    if not loc:
+        return None
+    la, lo = map(float, loc.split(","))
+    dist = lambda c: math.hypot(la - float(us[c].split(",")[0]), lo - float(us[c].split(",")[1]))
+    perto = lambda c: dist(c) <= 0.7
+    codigo = lambda c: re.fullmatch(r"[A-Z]{2,4}\d{3}", c)
+    # ponto com nome no KMZ ("Vassouras", "Araruama I"): o mapa acha pelo nome
+    alvo = _sa(cidade)
+    nomeados = [c for c in us if not codigo(c) and not re.search(r"\(", c) and perto(c)
+                and re.sub(r"^ufv\s+", "", _sa(c)).startswith(alvo)]
+    if len(nomeados) == 1:
+        return nomeados[0]
+    sig = _sa(cidade.split()[0])[:3].upper()
+    cands = sorted(c for c in us if codigo(c) and c.startswith(sig) and perto(c))  # Jataí → JAT100
+    if not cands:
+        juntinho = lambda c: math.hypot(la - float(us[c].split(",")[0]), lo - float(us[c].split(",")[1])) <= 0.15
+        cands = sorted(c for c in us if codigo(c) and juntinho(c))  # no mesmo lugar (S. Luís de Montes Belos → SLM)
+    if not cands:
+        # a usina mais perto, a até ~40 km, se só houver uma família de códigos ali (Itumbiara → ITR100)
+        proximos = sorted((c for c in us if codigo(c) and dist(c) <= 0.4), key=dist)
+        if proximos and len({re.match(r"[A-Z]+", c).group(0) for c in proximos}) == 1:
+            cands = proximos
+    num = re.search(r"\b(\d)\b|\b(I{1,3})\b", nome.split("/")[0].split(",")[0])
+    if num and cands:
+        n = num.group(1) or str(len(num.group(2)))
+        cands = [c for c in cands if re.search(r"\d", c) and c[re.search(r"\d", c).start()] == n] or cands
+    if not cands or len({re.match(r"[A-Z]+", c).group(0) for c in cands}) > 1 or len({us[c] for c in cands}) > 1:
+        return None  # nada perto, ou mais de uma usina possível e o nome não diz qual
+    return cands[0]
 
 
 def _local_da_usina(codigo):
