@@ -8,6 +8,13 @@ import config
 ARQ = os.path.join(config.DADOS, "clima.json")
 OPEN_METEO = "https://api.open-meteo.com/v1/forecast"
 HISTORICO = "https://historical-forecast-api.open-meteo.com/v1/forecast"
+GEOCODIFICAR = "https://geocoding-api.open-meteo.com/v1/search"
+UFS = {"AC": "Acre", "AL": "Alagoas", "AP": "Amapá", "AM": "Amazonas", "BA": "Bahia", "CE": "Ceará", "DF": "Distrito Federal",
+       "ES": "Espírito Santo", "GO": "Goiás", "MA": "Maranhão", "MT": "Mato Grosso", "MS": "Mato Grosso do Sul",
+       "MG": "Minas Gerais", "PA": "Pará", "PB": "Paraíba", "PR": "Paraná", "PE": "Pernambuco", "PI": "Piauí",
+       "RJ": "Rio de Janeiro", "RN": "Rio Grande do Norte", "RS": "Rio Grande do Sul", "RO": "Rondônia", "RR": "Roraima",
+       "SC": "Santa Catarina", "SP": "São Paulo", "SE": "Sergipe", "TO": "Tocantins"}
+_pendentes = {}   # usina fora do KMZ esperando a coordenada da cidade: {chave: (cidade, uf)}
 INMET = "https://apiprevmet3.inmet.gov.br/avisos/ativos"
 VALIDADE = 30 * 60          # atualiza a cada 30 min
 CAMPOS = "temperature_2m,precipitation,weather_code,wind_gusts_10m,cloud_cover,shortwave_radiation"
@@ -107,8 +114,14 @@ def atualizar(pontos, forcar=False):
         return
     try:
         d = _ler()
-        if not forcar and time.time() - d.get("ts", 0) < VALIDADE:
+        if not forcar and time.time() - d.get("ts", 0) < VALIDADE and not _pendentes:
             return
+        extras = dict(d.get("extras") or {})
+        for chave, (cidade, uf) in list(_pendentes.items())[:20]:
+            extras[chave] = _geocodificar(cidade, uf, pontos)
+            _pendentes.pop(chave, None)
+        pontos = pontos + [{"codigo": k, "lat": float(v.split(",")[0]), "lon": float(v.split(",")[1])}
+                           for k, v in extras.items() if v]
         locais = sorted({_local(p["lat"], p["lon"]) for p in pontos})
         tempo, erro = {}, None
         for i in range(0, len(locais), 50):
@@ -128,7 +141,7 @@ def atualizar(pontos, forcar=False):
         except Exception as e:
             avisos, erro = d.get("avisos", []), f"INMET: {e}"
         _gravar({"ts": time.time() if tempo else d.get("ts", 0), "tempo": tempo or d.get("tempo", {}),
-                 "avisos": avisos, "erro": erro, "historico": _ler().get("historico") or {},
+                 "avisos": avisos, "erro": erro, "historico": _ler().get("historico") or {}, "extras": extras,
                  "usinas": {p["codigo"]: _local(p["lat"], p["lon"]) for p in pontos}})
         try:
             import relatorio  # completa o tempo das ocorrências antigas, aos poucos
@@ -140,12 +153,65 @@ def atualizar(pontos, forcar=False):
 
 
 def atualizar_em_segundo_plano(pontos):
-    if time.time() - _ler().get("ts", 0) >= VALIDADE:
+    if time.time() - _ler().get("ts", 0) >= VALIDADE or _pendentes:
         threading.Thread(target=atualizar, args=(pontos,), daemon=True).start()
+
+
+def _geocodificar(cidade, uf, pontos):
+    """Coordenada da cidade (Open-Meteo, só o nome da cidade sai do PC). Sem UF, aceita só a cidade mais perto
+    das usinas do KMZ (evita o homônimo do outro lado do país). None se não achar."""
+    try:
+        r = _get(GEOCODIFICAR + "?" + urllib.parse.urlencode({"name": cidade, "count": 10, "language": "pt", "countryCode": "BR"}))
+    except Exception:
+        return None
+    res = [x for x in r.get("results") or [] if x.get("feature_code", "").startswith("PPL")]
+    if uf:
+        res = [x for x in res if x.get("admin1") == UFS.get(uf)]
+    elif pontos:
+        # sem UF: só cidades a menos de ~150 km de alguma usina do KMZ; entre elas, a maior
+        perto = lambda x: min(math.hypot(x["latitude"] - p["lat"], x["longitude"] - p["lon"]) for p in pontos)
+        res = [x for x in res if perto(x) <= 1.4]
+    if not res:
+        return None
+    x = max(res, key=lambda x: x.get("population") or 0)
+    return _local(x["latitude"], x["longitude"])
+
+
+def cidade_de(o):
+    """('Coroados', 'SP') a partir do nome da usina: "CAD200 – Coroados 200", "UFV Mucugê-BA", "UFV Santa Adélia - SP"."""
+    import re
+    if o.get("generico"):
+        return None, None  # grupo geral sem usina identificada
+    nome = re.sub(r"\s+Gerar\s*$", "", str(o.get("usina") or ""))
+    m = re.search(r"[-–/\s]\s*([A-Z]{2})\s*$", nome)
+    uf = m.group(1) if m and m.group(1) in UFS else None
+    if uf:
+        nome = nome[:m.start()]
+    nome = re.sub(r"\([^)]*\)|\bUFVs?\b|\b[A-Z]{2,4}\d{3}(?:/\d{3})?\b|[–—]|\b\d+\b|\b(I{1,3}|IV|V|VI)\b|\bGerar\b", " ", nome)
+    nome = " ".join(w for w in nome.replace("-", " ").replace(",", " ").split() if w != "e").strip(" .,")
+    return (nome, uf) if len(nome) >= 3 else (None, None)
+
+
+def chave_local(o):
+    """Por onde buscar o tempo da ocorrência: o código do KMZ ou, se a usina não está lá, a cidade."""
+    cod = o.get("codigo")
+    if cod and _local_da_usina(cod):
+        return cod
+    cidade, uf = cidade_de(o)
+    if not cidade:
+        return None
+    chave = "cidade:" + cidade + ("|" + uf if uf else "")
+    extras = _ler().get("extras") or {}
+    if chave not in extras:
+        _pendentes[chave] = (cidade, uf)
+        return None
+    return chave if extras[chave] else None
 
 
 def _local_da_usina(codigo):
     d = _ler()
+    if str(codigo).startswith("cidade:"):
+        return (d.get("extras") or {}).get(codigo)
     us = d.get("usinas") or {}
     if codigo in us:
         return us[codigo]
@@ -157,8 +223,8 @@ def nivel(precip, rajada, cod):
     """'severo' (trovoada, chuva forte, vendaval), 'chuva' (chuva/vento moderados) ou None."""
     if (cod or 0) >= 95 or (precip or 0) >= 10 or (rajada or 0) >= 60 or cod in (65, 82):
         return "severo"
-    if (precip or 0) >= 2 or (rajada or 0) >= 50 or (cod or 0) >= 61:
-        return "chuva"  # garoa e vento comum não contam
+    if (precip or 0) >= 1 or (rajada or 0) >= 50 or (cod or 0) >= 55:
+        return "chuva"  # garoa fraca e vento comum não contam; garoa forte (molha equipamento, baixa R.I) conta
     return None
 
 
@@ -208,10 +274,10 @@ def _em_vigor(a, agora=None):
 
 def avisos_da_usina(codigo):
     """Avisos do INMET em vigor agora sobre a usina (um por tipo: o mais severo)."""
-    k = chave_codigo(codigo)
+    k = codigo if str(codigo).startswith("cidade:") else chave_codigo(codigo)
     por_tipo = {}
     for a in _ler().get("avisos") or []:
-        if _em_vigor(a) and any(chave_codigo(u) == k for u in a["usinas"]):
+        if _em_vigor(a) and any((u if u.startswith("cidade:") else chave_codigo(u)) == k for u in a["usinas"]):
             atual = por_tipo.get(a["descricao"])
             if not atual or GRAVIDADE.get(a["severidade"], 0) > GRAVIDADE.get(atual["severidade"], 0):
                 por_tipo[a["descricao"]] = a
@@ -262,7 +328,7 @@ def anotar(ocorrencias):
     """Acrescenta o tempo na hora do início de cada ocorrência (e o aviso do INMET em vigor, se houver).
     O que já foi anotado fica (o histórico guarda; o dado por hora só cobre 3 dias)."""
     for o in ocorrencias:
-        cod = o.get("codigo")
+        cod = chave_local(o)
         if not cod:
             continue
         if not o.get("clima"):
@@ -270,6 +336,19 @@ def anotar(ocorrencias):
             if c:
                 o["clima"] = c
         if not o.get("normalizado"):
+            agora = time.time()
+            o["clima_agora"] = tempo_em(cod, agora, margem=0)  # a última hora medida
+            # pior hora das próximas 6 h (para decidir quando mandar o técnico)
+            prev = tempo_em(cod, agora + 3 * 3600 + 1800, margem=3 * 3600)
+            if prev and prev.get("nivel"):
+                h = (((_ler().get("tempo") or {}).get(_local_da_usina(cod)) or {}).get("hora") or {})
+                pior = [t for t, p, g, c in zip(h.get("time", []), h.get("precipitation", []), h.get("wind_gusts_10m", []),
+                                                h.get("weather_code", []))
+                        if agora < t <= agora + 6 * 3600 and nivel(p, g, c)]
+                prev["quando"] = pior[0] if pior else None
+                o["clima_previsao"] = prev
+            else:
+                o["clima_previsao"] = None
             av = avisos_da_usina(cod)
             o["aviso_inmet"] = [{"descricao": a["descricao"], "severidade": a["severidade"], "cor": a["cor"],
                                  "fim": a["fim"]} for a in av] or None

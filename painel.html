@@ -665,6 +665,9 @@ const horaAviso = s => (s || "").slice(11, 16);
 function tagsClima(o) {
   const c = o.clima, partes = [];
   if (c && c.nivel) partes.push(`<span class="tag clima ${c.nivel}" title="Tempo na usina por volta do início (${dhm(o.inicio_ts)}), Open-Meteo.${c.nivel === "severo" ? " Temporal na hora: causa provável do evento." : ""}">${esc(c.rotulo).toUpperCase()}</span>`);
+  const ag = o.clima_agora, pv = o.clima_previsao;
+  if (!o.normalizado && ag && ag.nivel && (!c || ag.rotulo !== c.rotulo)) partes.push(`<span class="tag clima ${ag.nivel}" title="Tempo na usina agora (última hora), Open-Meteo">AGORA: ${esc(ag.rotulo).toUpperCase()}</span>`);
+  if (!o.normalizado && pv && pv.nivel) partes.push(`<span class="tag clima ${pv.nivel}" title="Pior hora prevista nas próximas 6 h, Open-Meteo">PREVISÃO${pv.quando ? " " + hm(pv.quando).toUpperCase() : ""}: ${esc(pv.rotulo).toUpperCase()}</span>`);
   if (!o.normalizado) (o.aviso_inmet || []).forEach(a => partes.push(`<span class="tag inmet" style="--cor-inmet:${esc(a.cor || "#fbbf24")}" title="Aviso do INMET em vigor sobre a usina (${esc(a.severidade)}), até ${esc(horaAviso(a.fim))}">⚠️ INMET: ${esc(a.descricao).toUpperCase()}</span>`));
   return partes.join("");
 }
@@ -1221,9 +1224,11 @@ function desenharDetalhe(o, mensagens) {
     <div class="meta-g"><span class="sev" style="--cor:${cor}">${nivel}</span>${o.codigo ? `<span class="tag">${esc(o.codigo)}</span>` : ""}
       <span class="mono">${dhm(o.inicio_ts)}${norm ? " → " + dhm(norm.ts) : ""}</span><span>· ${duracao}</span>${o.qtd > 1 ? `<span>· ${o.qtd} avisos</span>` : ""}${o.ciente ? `<span class="tag">CIENTE</span>` : ""}</div>
     <div class="meta-g" style="margin-top:4px">${esc((o.grupos || []).join(" · "))}</div>
-    ${o.clima || (o.aviso_inmet || []).length ? `<div class="clima-g" style="margin-top:8px">
+    ${o.clima || o.clima_agora || (o.aviso_inmet || []).length ? `<div class="clima-g" style="margin-top:8px">
       ${o.clima ? `<div>🌡️ <b>Tempo na usina no início</b> (${hm(o.inicio_ts)}): ${esc(o.clima.rotulo)}${o.clima.nuvens != null ? ` · ${o.clima.nuvens}% de nuvens` : ""}${o.clima.irradiacao != null ? ` · ${Math.round(o.clima.irradiacao)} W/m²` : ""}
         ${o.clima.nivel === "severo" ? `<div style="color:#fdba74">⛈️ Temporal na região na hora do evento: causa provável (oscilação ou descarga na rede).</div>` : ""}</div>` : ""}
+      ${!norm && o.clima_agora ? `<div>🕐 <b>Agora</b>: ${esc(o.clima_agora.rotulo)}${o.clima_agora.nuvens != null ? ` · ${o.clima_agora.nuvens}% de nuvens` : ""}</div>` : ""}
+      ${!norm && o.clima_previsao ? `<div>🔮 <b>Próximas 6 h</b>: ${esc(o.clima_previsao.rotulo)}${o.clima_previsao.quando ? ` a partir das ${hm(o.clima_previsao.quando)}` : ""}</div>` : ""}
       ${(o.aviso_inmet || []).map(a => `<div class="inmet-g" style="--cor-inmet:${esc(a.cor || "#fbbf24")}">⚠️ <b>INMET: ${esc(a.descricao)}</b> (${esc(a.severidade)}) em vigor na usina até ${esc(horaAviso(a.fim))}</div>`).join("")}
     </div>` : ""}
     <div class="botoes">
