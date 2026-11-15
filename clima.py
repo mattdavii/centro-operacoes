@@ -198,6 +198,14 @@ def chave_local(o):
     if cod and _local_da_usina(cod):
         return cod
     cidade, uf = cidade_de(o)
+    if cod and not cidade:
+        # só o código ("UFV CAD100/CAD200"): usa o nome aprendido do COG para o código, ou de outro da mesma sigla
+        import re, relatorio
+        nomes = relatorio.codigos()
+        sigla = re.match(r"[A-Z]+", str(cod)).group(0) if re.match(r"[A-Z]+", str(cod)) else None
+        nome = nomes.get(str(cod).split("/")[0]) or next((n for c, n in nomes.items() if sigla and c.startswith(sigla)), None)
+        if nome:
+            cidade, uf = cidade_de({"usina": nome})
     if not cidade:
         return None
     chave = "cidade:" + cidade + ("|" + uf if uf else "")
@@ -297,13 +305,13 @@ def preencher_historico(ocorrencias, limite=40):
     histórico do Open-Meteo e guarda em clima.json["historico"][chave]. Poucas consultas por vez."""
     d = _ler()
     feito = d.get("historico") or {}
-    falta = [o for o in ocorrencias if o.get("codigo") and o.get("chave") not in feito and not o.get("clima")
-             and time.time() - o["inicio_ts"] > 2 * 86400 and _local_da_usina(o["codigo"])]
+    falta = [o for o in ocorrencias if o.get("chave") not in feito and not o.get("clima")
+             and time.time() - o["inicio_ts"] > 2 * 86400 and chave_local(o)]
     if not falta:
         return 0
     por_local = {}
     for o in falta:
-        por_local.setdefault(_local_da_usina(o["codigo"]), []).append(o)
+        por_local.setdefault(_local_da_usina(chave_local(o)), []).append(o)
     n = 0
     for loc, ocs in list(por_local.items())[:limite]:
         ini = time.strftime("%Y-%m-%d", time.localtime(min(o["inicio_ts"] for o in ocs) - 86400))
@@ -316,7 +324,7 @@ def preencher_historico(ocorrencias, limite=40):
         except Exception:
             continue
         for o in ocs:
-            c = tempo_em(o["codigo"], o["inicio_ts"], serie=h)
+            c = tempo_em(chave_local(o), o["inicio_ts"], serie=h)
             feito[o["chave"]] = c or {}
             n += 1
     d = dict(_ler(), historico=feito)
