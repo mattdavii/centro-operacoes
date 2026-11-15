@@ -134,7 +134,7 @@ def montar(inicio_ts, fim_ts, painel, plantao=None):
     if abertas:
         t.append("*⚠️ Ainda abertas:*")
         for o in abertas:
-            t.append(f"• {o['usina']} ({'CRÍTICA' if o['sev'] == 'critico' else 'alerta'}) desde {_hora(o['inicio_ts'])}"
+            t.append(f"• {o['usina']} ({'CRÍTICA' if o['sev'] == 'critico' else 'alerta'}{', ' + STATUS_TXT[o['status']] if o.get('status') in STATUS_TXT else ''}) desde {_hora(o['inicio_ts'])}"
                      f"{' [herdada]' if o['inicio_ts'] < inicio_ts else ''}: {o['msg']['texto'][:140]}"
                      + (f" [{_clima(o)['rotulo']}]" if _clima(o) and _clima(o).get("nivel") else ""))
         t.append("")
@@ -184,8 +184,10 @@ def montar(inicio_ts, fim_ts, painel, plantao=None):
     def linha(o):
         fim = o.get("normalizado")
         estado = (f"normalizada {_hora(fim['ts'])}" + {"manual": " (no painel)", "inatividade": " (por inatividade)"}.get(fim.get("motivo"), "")) if fim and fim["ts"] <= fim_ts else "ABERTA"
+        if estado == "ABERTA" and o.get("status") in STATUS_TXT:
+            estado += " · " + STATUS_TXT[o["status"]]
         dur = _dur((fim["ts"] if fim and fim["ts"] <= fim_ts else min(agora, fim_ts)) - o["inicio_ts"])
-        return (f"<tr class='{o['sev']}{' aberta' if estado == 'ABERTA' else ''}'><td>{e(_hora(o['inicio_ts']))}</td><td><b>{e(o['usina'])}</b>{'<div class=q>herdada do turno anterior</div>' if o['inicio_ts'] < inicio_ts else ''}</td>"
+        return (f"<tr class='{o['sev']}{' aberta' if estado.startswith('ABERTA') else ''}'><td>{e(_hora(o['inicio_ts']))}</td><td><b>{e(o['usina'])}</b>{'<div class=q>herdada do turno anterior</div>' if o['inicio_ts'] < inicio_ts else ''}</td>"
                 f"<td>{'Crítica' if o['sev'] == 'critico' else 'Alerta'}</td><td>{e(o['msg']['texto'][:220])}<div class='q'>{e(o['msg']['de'])} · {e(' · '.join(o.get('grupos', [])))}</div>"
                 f"{('<div class=q>Tempo na usina: ' + e(_clima(o)['rotulo']) + '</div>') if _clima(o) and _clima(o).get('nivel') else ''}</td>"
                 f"<td>{e(estado)}</td><td>{dur}</td></tr>")
@@ -227,6 +229,10 @@ th{{font-size:11px;text-transform:uppercase;color:#555}} tr.critico td:nth-child
 <h2 class="texto">Texto para WhatsApp / e-mail</h2><pre id="txt">{e(texto)}</pre>
 </body></html>"""
     return pagina, texto
+
+
+STATUS_TXT = {"aberto": "em aberto", "a_caminho": "técnico a caminho", "em_atendimento": "em atendimento",
+              "em_tratativa": "em tratativa"}
 
 
 def _clima(o):

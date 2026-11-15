@@ -404,6 +404,41 @@ def eh_normalizacao(t):
     return False
 
 
+# andamento da ocorrência (status automático), lido nas mensagens dos grupos da usina depois do primeiro aviso
+STATUS_CAMINHO = re.compile(r"\b(em deslocamento|deslocando|deslocaremos|me deslocando|a caminho|estou indo|estamos indo|"
+                            r"indo (para|pra) (a |o )?(usina|ufv|local|projeto)|saindo (agora )?(para|pra) (a |o )?(usina|ufv)|"
+                            r"comecando o deslocamento|tecnico acionado:|acionamento\s*[–—-]\s*corretiva)")
+STATUS_ATENDIMENTO = re.compile(r"\b(verificando|em atendimento|cheguei|chegamos|no local|"
+                                r"(estou|estamos|to) na (usina|ufv)|iniciando (a |o )?(verificacao|inspecao|atendimento)|"
+                                r"realizando (a |o )?(verificacao|inspecao|teste|troca|manobra)|vou (iniciar|comecar))\b")
+STATUS_TRATATIVA = re.compile(r"\b(amanha|proxima semana|segunda[- ]feira|aguardando (a |o |as |os )?(peca|material|equipamento|compra|"
+                              r"orcamento|concessionaria|cliente|autorizacao|liberacao|troca|chegada|envio|terceiro|retorno|"
+                              r"aprovacao|fornecedor|transportadora|equipe)|sem previsao|reagendad\w*|remarcad\w*|"
+                              r"fica(ra|r)? para (amanha|depois|outro dia|segunda)|"
+                              r"(condicoes climaticas|chuva|relampago|raio)[^.?!]{0,60}\b(mobilizar|deslocar|atendimento|servico|seguir)|"
+                              r"nao (sera|e) possivel (ir|atender|deslocar|mobilizar|resolver)|esperar (as condicoes|melhorar|a chuva)|"
+                              r"servico por hoje (finalizado|encerrado)|necessario (comprar|adquirir|orcamento)|pendente de)\b")
+
+
+def chave_codigo(c):
+    """CAR101 e CAR100 → CAR1 (mesma regra do mapa)."""
+    m = re.match(r"^([A-Z]{2,4})(\d)", str(c or "").split("/")[0].strip().upper())
+    return m.group(1) + m.group(2) if m else None
+
+
+def status_da_mensagem(t):
+    """t sem acento. 'a_caminho', 'em_atendimento', 'em_tratativa' ou None. Pergunta não conta."""
+    if t.rstrip().endswith("?"):
+        return None
+    if STATUS_TRATATIVA.search(t):
+        return "em_tratativa"
+    if STATUS_ATENDIMENTO.search(t):
+        return "em_atendimento"
+    if STATUS_CAMINHO.search(t):
+        return "a_caminho"
+    return None
+
+
 FALSO = re.compile(r"\b(fakes?|falsos?|falsas?|indevid\w*|espuri\w*|sem desarme|nao desarmou)\b")
 # "Usina:" é só o campo do formulário de acionamento; "emergencial"/"acionamento" falam do chamado, não da usina inteira
 USINA_TODA = re.compile(r"\b(usina(?!\s*:)|projeto|disjuntor|52l|religador|protecao|rele|trafo|transformador|cabine|subestacao|"

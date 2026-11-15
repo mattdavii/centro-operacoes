@@ -202,6 +202,15 @@
   .pergunta .sim { color: var(--azul); border-color: #2b4a99; } .pergunta .nao { color: var(--verde); border-color: #1e7a4c; }
   /* manutenções e técnicos em campo */
   .tag.manut { color: #cfe3ff; background: #12306b; }
+  .st-sel { font-family: inherit; font-size: 9px; font-weight: 800; line-height: 1.2; letter-spacing: .6px; padding: 1px 3px; border-radius: 4px; border: 1px solid transparent; cursor: pointer;
+    background: #22304f; color: #dbe4ff; text-transform: uppercase; max-width: 190px; }
+  .st-sel.st-aberto { background: #3a2230; color: #ffc9d0; border-color: #6b2a3a; }
+  .st-sel.st-a_caminho { background: #0f3550; color: #9fdcff; border-color: #1f6a96; }
+  .st-sel.st-em_atendimento { background: #2a2158; color: #d6c8ff; border-color: #5a47b0; }
+  .st-sel.st-em_tratativa { background: #3d3108; color: #fde68a; border-color: #8a6d00; }
+  .st-sel.st-resolvido { background: #0b2a1d; color: #bbf7d0; border-color: #1e7a4c; }
+  .st-sel option { background: #0b1226; color: #e6edff; }
+  .st-motivo { font-size: 11px; color: var(--fraco); margin-top: 2px; }
   .tag.clima { color: #cfeaff; background: #123a52; }
   .tag.clima.severo { color: #ffe4c4; background: #6b2d0a; }
   .tag.inmet { color: #1a1300; background: var(--cor-inmet, #fbbf24); }
@@ -690,6 +699,24 @@ function reforcar() {
 setInterval(reforcar, 30000);
 
 /* ---------- desenho ---------- */
+/* ---------- status da ocorrência ---------- */
+const STATUS_OC = { aberto: "Em aberto", a_caminho: "🚗 Técnico a caminho", em_atendimento: "👷 Em atendimento", em_tratativa: "⏳ Em tratativa", resolvido: "✔ Resolvido" };
+function seletorStatus(o) {
+  const st = o.normalizado ? "resolvido" : (o.status || "aberto");
+  const dica = o.normalizado ? "Resolvida" : o.status_origem === "manual" ? "Definido por você no painel" + (o.status_ts ? " às " + hm(o.status_ts) : "")
+    : o.status_motivo ? "Automático: " + o.status_motivo : "Ninguém avisou andamento ainda";
+  return `<select class="st-sel st-${st}" data-status-oc="${esc(o.chave)}" title="${esc(dica)}">${Object.entries(STATUS_OC).map(([k, v]) => `<option value="${k}"${k === st ? " selected" : ""}>${v}</option>`).join("")}</select>`;
+}
+document.addEventListener("change", async ev => {
+  const s = ev.target.closest("[data-status-oc]"); if (!s) return;
+  const chave = s.dataset.statusOc, st = s.value;
+  let nota = "";
+  if (st === "resolvido") { nota = prompt("Resolvida. Observação (opcional):", ""); if (nota === null) { desenhar(); return; } }
+  s.disabled = true;
+  const r = await post("/api/acao", { chave, tipo: "status", status: st, nota });
+  if (r && r.pronto !== undefined) { dados = r; desenhar(); if (ocAberta === chave) abrirDetalhe(chave); }
+});
+
 /* ---------- tempo nas usinas (Open-Meteo) e avisos do INMET ---------- */
 function avisoEmVigor(a) {
   const t = s => { const m = /^(\d{4})-(\d\d)-(\d\d) (\d\d):(\d\d)/.exec(s || ""); return m ? new Date(+m[1], m[2] - 1, +m[3], +m[4], +m[5]).getTime() / 1000 : null; };
@@ -849,7 +876,7 @@ function desenhar() {
       <div class="barra"></div>
       <div style="min-width:0">
         <div class="topo"><span class="usina">${esc(nomeUsina(o))}</span>${o.codigo && !o.usina.startsWith(o.codigo) ? `<span class="tag">${esc(o.codigo)}</span>` : ""}
-          <span class="sev">${o.normalizado ? motivoBaixa(o) : o.sev === "critico" ? "CRÍTICA" : "ALERTA"}</span>
+          <span class="sev">${o.normalizado ? motivoBaixa(o) : o.sev === "critico" ? "CRÍTICA" : "ALERTA"}</span>${o.normalizado ? "" : seletorStatus(o)}
           ${o.era_critica && !o.normalizado ? `<span class="tag" title="Começou como crítica; os avisos mais recentes são só de alerta">ERA CRÍTICA</span>` : ""}
           ${o.qtd > 1 ? `<span class="tag">${o.qtd} AVISOS</span>` : ""}${o.ciente ? `<span class="tag">CIENTE</span>` : ""}
           ${o.durante_manutencao ? `<span class="tag manut" title="Começou com uma manutenção em andamento na usina">🔧 DURANTE MANUTENÇÃO: ${esc(o.durante_manutencao.descricao).toUpperCase()}</span>` : ""}
@@ -1335,6 +1362,8 @@ function desenharDetalhe(o, mensagens) {
     <div class="meta-g"><span class="sev" style="--cor:${cor}">${nivel}</span>${o.codigo ? `<span class="tag">${esc(o.codigo)}</span>` : ""}
       <span class="mono">${dhm(o.inicio_ts)}${norm ? " → " + dhm(norm.ts) : ""}</span><span>· ${duracao}</span>${o.qtd > 1 ? `<span>· ${o.qtd} avisos</span>` : ""}${o.ciente ? `<span class="tag">CIENTE</span>` : ""}</div>
     <div class="meta-g" style="margin-top:4px">${esc((o.grupos || []).join(" · "))}</div>
+    <div class="meta-g" style="margin-top:6px"><span>STATUS</span>${seletorStatus(o)}</div>
+    ${!norm && o.status_motivo ? `<div class="st-motivo">${o.status_origem === "manual" ? "✋ " : "🤖 "}${esc(o.status_motivo)}${o.status_ts ? " · " + hm(o.status_ts) : ""}</div>` : ""}
     ${o.clima || o.clima_agora || (o.aviso_inmet || []).length ? `<div class="clima-g" style="margin-top:8px">
       ${o.clima ? `<div>🌡️ <b>Tempo na usina no início</b> (${hm(o.inicio_ts)}): ${esc(o.clima.rotulo)}${o.clima.nuvens != null ? ` · ${o.clima.nuvens}% de nuvens` : ""}${o.clima.irradiacao != null ? ` · ${Math.round(o.clima.irradiacao)} W/m²` : ""}
         ${o.clima.nivel === "severo" ? `<div style="color:#fdba74">⛈️ Temporal na região na hora do evento: causa provável (oscilação ou descarga na rede).</div>` : ""}</div>` : ""}
@@ -1401,7 +1430,7 @@ document.addEventListener("click", async ev => {
   }
   // clique na ocorrência (fora dos botões dela) abre o detalhe
   const oc = ev.target.closest(".oc");
-  if (oc && !ev.target.closest("button")) abrirDetalhe(oc.dataset.chave);
+  if (oc && !ev.target.closest("button, select")) abrirDetalhe(oc.dataset.chave);
 });
 // o mapa (e os técnicos próximos) também servem ao detalhe: carrega o KMZ em segundo plano
 (async () => { try { const r = await fetch(BASE + "/api/mapa", { headers: cabecalhos() }); kmz = await r.json(); } catch { try { kmz = JSON.parse(localStorage.getItem("cache_mapa")); } catch {} } })();

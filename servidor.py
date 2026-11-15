@@ -119,6 +119,10 @@ def montar():
     except Exception:
         traceback.print_exc()
     atividades, presencas, manut_recentes = manutencoes_com_acoes(d, acoes, ocorrencias, usinas)
+    try:
+        aplicar_status(ocorrencias, presencas, acoes, usinas)
+    except Exception:
+        traceback.print_exc()
     abertos = lambda linhas, t: [l for l in linhas if coletor.aberto(l.get("status"), t)]
     # fechados mais recentemente atualizados primeiro (um chamado antigo resolvido hoje aparece em "Resolvidos hoje")
     fechados = lambda linhas: sorted([l for l in linhas if not coletor.aberto(l.get("status"), "chamado")
@@ -189,13 +193,76 @@ def acoes_por_mensagem(acoes):
     out = {}
     for chave, a in acoes.items():
         tipo, base = ("enc", chave[4:]) if chave.startswith("enc:") else ("keep", chave[5:]) if chave.startswith("keep:") \
-            else ("acomp", chave[6:]) if chave.startswith("acomp:") \
+            else ("acomp", chave[6:]) if chave.startswith("acomp:") else ("st", chave[3:]) if chave.startswith("st:") \
             else ("ciente", chave) if a.get("tipo") == "ciente" else (None, None)
         if not tipo:
             continue
         for mid in set(a.get("ids") or []) | set((hist.get(base) or {}).get("ids") or []):
             out.setdefault(mid, {})[tipo] = a
     return out
+
+
+STATUS = {"aberto": "Em aberto", "a_caminho": "Técnico a caminho", "em_atendimento": "Em atendimento",
+          "em_tratativa": "Em tratativa", "resolvido": "Resolvido"}
+TRATATIVA_PERGUNTA = 24 * 3600  # em tratativa: pergunta se continua só depois de 24 h sem novidade
+
+
+def status_automatico(o, presencas, jids_usina):
+    """Andamento lido nos grupos: entrada/saída do técnico na usina e frases ("em deslocamento", "verificando",
+    "amanhã", "aguardando peça"). Devolve (ts, status, motivo) do sinal mais recente, ou None."""
+    ini = o["inicio_ts"] - 600
+    fim = (o.get("normalizado") or {}).get("ts") or time.time()
+    sinais = []
+    for p in presencas:
+        mesma = p.get("chave_usina") == o.get("chave_usina") or (
+            o.get("codigo") and p.get("codigo") and coletor.chave_codigo(p["codigo"]) == coletor.chave_codigo(o["codigo"]))
+        if not mesma or p["entrada_ts"] > fim or (p.get("saida_ts") and p["saida_ts"] < ini):
+            continue
+        sinais.append((max(p["entrada_ts"], ini), "em_atendimento", f"{p['tecnico']} entrou na usina às {time.strftime('%H:%M', time.localtime(p['entrada_ts']))}"))
+        if p.get("saida_ts") and not p.get("sem_saida") and p["saida_ts"] <= fim:
+            sinais.append((p["saida_ts"], "aberto", f"{p['tecnico']} saiu da usina às {time.strftime('%H:%M', time.localtime(p['saida_ts']))} sem baixa"))
+    ids = set(o.get("ids") or [])
+    for jid in set(o.get("jids") or [o.get("jid")]):
+        msgs = ((estado["cache"].get(jid) or {}).get("dados") or {}).get("messages") or []
+        da_usina = jid in jids_usina
+        for m in msgs:
+            if not (ini <= m.get("ts", 0) <= fim) or not (da_usina or m.get("id") in ids):
+                continue
+            t = coletor.sem_acento(coletor.texto(m))
+            st = coletor.status_da_mensagem(t)
+            if st:
+                quem = "você" if m.get("sender") == "me" else (m.get("sender") or "?")
+                sinais.append((m["ts"], st, f"{quem}: {coletor.texto(m)[:120]}"))
+    return max(sinais, key=lambda x: x[0]) if sinais else None
+
+
+def aplicar_status(ocorrencias, presencas, acoes, usinas):
+    """Status de cada ocorrência: o automático ou o escolhido no painel, o que for mais recente."""
+    jids_usina = {u["jid"] for u in usinas}
+    por_msg = acoes_por_mensagem(acoes)
+    for o in ocorrencias:
+        if o.get("normalizado"):
+            o["status"], o["status_origem"], o["status_motivo"] = "resolvido", "auto", None
+            continue
+        manual = acoes.get("st:" + o["chave"])
+        for mid in o.get("ids") or []:
+            a = por_msg.get(mid, {}).get("st")
+            if a and (not manual or a["ts"] > manual["ts"]):
+                manual = a
+        auto = status_automatico(o, presencas, jids_usina)
+        if manual and (not auto or manual["ts"] >= auto[0]):
+            o["status"], o["status_origem"], o["status_ts"] = manual["status"], "manual", manual["ts"]
+            o["status_motivo"] = "definido por você no painel"
+        elif auto:
+            o["status"], o["status_origem"], o["status_ts"], o["status_motivo"] = auto[1], "auto", auto[0], auto[2]
+        else:
+            o["status"], o["status_origem"], o["status_motivo"] = "aberto", "auto", None
+        if o["status"] in ("a_caminho", "em_atendimento", "em_tratativa"):
+            o["ciente"] = True  # alguém está cuidando: não repete o alarme
+        if o["status"] == "em_tratativa" and o.get("confirmar"):
+            base = max(o["ultima_ts"], o.get("status_ts") or 0)
+            if time.time() - base < TRATATIVA_PERGUNTA:
+                o.pop("confirmar", None)  # ficou para depois: pergunta só depois de 24 h
 
 
 def ocorrencias_com_acoes(d, acoes):
@@ -722,7 +789,7 @@ class Pagina(http.server.BaseHTTPRequestHandler):
             return self.responder(400, {"erro": "ação de plantão inválida"})
         if self.path == "/api/acao":
             chave, tipo = corpo.get("chave"), corpo.get("tipo")
-            if not chave or tipo not in ("respondi", "resolvido", "ignorar", "lembrar", "desfazer", "ciente", "encerrar", "reabrir", "acompanhar",
+            if not chave or tipo not in ("respondi", "resolvido", "ignorar", "lembrar", "desfazer", "ciente", "encerrar", "reabrir", "acompanhar", "status",
                                                   "fim_manutencao", "continua_manutencao", "reabrir_manutencao", "saida_tecnico"):
                 return self.responder(400, {"erro": "ação inválida"})
             with trava:
@@ -749,6 +816,17 @@ class Pagina(http.server.BaseHTTPRequestHandler):
                     acoes["saida:" + chave] = {"tipo": tipo, "ts": int(time.time())}
                 elif tipo == "acompanhar":
                     acoes["acomp:" + chave] = {"tipo": "acompanhar", "ts": int(time.time()), "ids": ids}
+                elif tipo == "status":
+                    st = corpo.get("status")
+                    if st not in STATUS:
+                        return self.responder(400, {"erro": "status inválido"})
+                    if st == "resolvido":
+                        acoes["enc:" + chave] = {"tipo": "encerrar", "ts": int(time.time()), "nota": str(corpo.get("nota", ""))[:200], "ids": ids}
+                    else:
+                        if (atual or {}).get("normalizado") or ("enc:" + chave) in acoes:
+                            acoes.pop("enc:" + chave, None)  # voltar de "resolvido" reabre a ocorrência
+                            acoes["keep:" + chave] = {"tipo": "reabrir", "ts": int(time.time()), "ids": ids}
+                        acoes["st:" + chave] = {"tipo": "status", "status": st, "ts": int(time.time()), "ids": ids}
                 elif tipo == "encerrar":
                     acoes["enc:" + chave] = {"tipo": "encerrar", "ts": int(time.time()), "nota": str(corpo.get("nota", ""))[:200], "ids": ids}
                 else:
@@ -760,7 +838,8 @@ class Pagina(http.server.BaseHTTPRequestHandler):
                         a["ids"] = ids
                     acoes[chave] = a
                 # limpa marcações velhas (mais de 7 dias)
-                acoes = {k: v for k, v in acoes.items() if time.time() - v["ts"] < 7 * 86400}
+                acoes = {k: v for k, v in acoes.items()
+                         if time.time() - v["ts"] < (30 if k.startswith(("st:", "enc:", "keep:")) else 7) * 86400}
                 gravar_acoes(acoes)
                 painel = montar()
                 registrar(painel)

@@ -99,6 +99,16 @@ for frase, nivel in [
     if coletor.classificar(coletor.sem_acento(frase)) != nivel:
         erros += 1
         print("✗ gravidade:             ", frase, "→", coletor.classificar(coletor.sem_acento(frase)), "(esperado", nivel + ")")
+# status da ocorrência pelo andamento escrito nos grupos
+for frase, st in [("Em deslocamento para UFV X", "a_caminho"), ("*🚨 ACIONAMENTO – CORRETIVA EMERGENCIAL* Técnico acionado: Fulano", "a_caminho"),
+                  ("Verificando", "em_atendimento"), ("Cheguei a pouco para religar a UFV", "em_atendimento"),
+                  ("Seguiremos com o atendimento amanhã no primeiro horário.", "em_tratativa"),
+                  ("vamos esperar as condições climáticas melhorarem pra mobilizar o técnico", "em_tratativa"),
+                  ("aguardando peça para troca do relé", "em_tratativa"), ("alguém já está a caminho?", None),
+                  ("Bom dia, como está a usina?", None)]:
+    if coletor.status_da_mensagem(coletor.sem_acento(frase)) != st:
+        erros += 1
+        print("✗ status:                ", frase, "→", coletor.status_da_mensagem(coletor.sem_acento(frase)))
 # nomes de usina: uma palavra só em comum não basta
 for x, y, igual in [("UFV S. LUIS M. BELOS 2/GO", "Luís Eduardo Magalhães", False), ("Paty dos Alferes 100", "UFV Paty do Alferes", True),
                     ("UFV S. LUIS M. BELOS 1/GO", "São Luís de Montes Belos 1", True), ("UFV CONCÓRDIA", "Concórdia do Pará", True)]:
