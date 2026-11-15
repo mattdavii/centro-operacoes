@@ -351,6 +351,7 @@ def ler_presenca(linha):
     a = re.split(r"[.!]\s+", antes.strip(" -–,.:"))[-1]  # "Vistoria concluída! Técnico Rogger ... saída"
     if re.match(r"^UFVs?\b", a, re.I):
         lugar_antes, a = re.sub(r"^\s*UFVs?\s*[-–:]?\s*", "", a, flags=re.I).strip(" -–"), ""
+    a = re.sub(r"^(j[aá]|agora|acabei de|enfim|finalmente|ok|blz|beleza)\b[\s,!.]*", "", a, flags=re.I)  # "Já cheguei"
     while True:  # tira "Bom dia", "@COG", "Tec.", "Técnico"
         b = SAUDACAO.sub("", a, count=1).strip(" -–,.:!")
         if b == a:

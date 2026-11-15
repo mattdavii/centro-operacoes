@@ -1,5 +1,5 @@
 # Histórico de ocorrências (30 dias) e relatório de passagem de plantão do Centro de Operações.
-import datetime as dt, html, json, os, time
+import datetime as dt, html, json, os, re, time
 
 import config
 DADOS = config.DADOS
@@ -179,6 +179,7 @@ def montar(inicio_ts, fim_ts, painel, plantao=None):
             t.append(f"• {c.get('usina')}: {c.get('assunto')} ({c.get('status')})")
     texto = "\n".join(t).strip()
 
+    diario = episodios_diario(ocs, inicio_ts)
     # ---- página para imprimir / salvar em PDF ----
     e = html.escape
     def linha(o):
@@ -207,7 +208,8 @@ th{{font-size:11px;text-transform:uppercase;color:#555}} tr.critico td:nth-child
 .tl .b{{position:absolute;top:4px;height:8px;border-radius:4px;min-width:4px;-webkit-print-color-adjust:exact;print-color-adjust:exact}}
 .tl .eixo{{display:flex;justify-content:space-between;margin-left:208px;font-size:10px;color:#666}}
 .tl .leg{{font-size:11px;color:#555;margin-bottom:4px}} .tl .leg i{{display:inline-block;width:10px;height:6px;border-radius:3px;margin:0 4px 0 10px}} button{{font:inherit;padding:6px 12px;border-radius:6px;border:1px solid #bbb;background:#f3f3f3;cursor:pointer}}
-@media print{{.barra,pre,h2.texto{{display:none}} body{{margin:8mm}}}}
+table.diario td,table.diario th{{font-size:11px}} h2.diario-t button{{font-size:12px;margin-left:8px}}
+@media print{{.barra,pre,h2.texto,.diario-t button{{display:none}} body{{margin:8mm}}}}
 </style></head><body>
 <div class="barra"><button onclick="print()">Imprimir / salvar PDF</button><button onclick="navigator.clipboard.writeText(document.getElementById('txt').textContent).then(()=>this.textContent='Copiado ✓')">Copiar texto para WhatsApp</button></div>
 <h1>{e(titulo)} — passagem de plantão</h1><div class="sub">Período {e(periodo)}{(' · Equipe: ' + e(equipe)) if equipe else ''} · gerado {e(_hora(agora))}</div>
@@ -217,6 +219,12 @@ th{{font-size:11px;text-transform:uppercase;color:#555}} tr.critico td:nth-child
 {linha_do_tempo(ocs, inicio_ts, min(fim_ts, agora))}
 <h2>Ocorrências do período</h2><table><tr><th>Início</th><th>Usina</th><th>Nível</th><th>O que aconteceu</th><th>Situação</th><th>Duração</th></tr>
 {''.join(linha(o) for o in ocs) or '<tr><td colspan=6>Nenhuma ocorrência registrada.</td></tr>'}</table>
+<h2 class="diario-t">Diário de Bordo · para colar na planilha <button onclick="copiarDiario(this)">Copiar tabela</button></h2>
+<div class="q diario-t">Mesmas colunas do Diário de Bordo do sobreaviso. Confira e complete Responsável, Formalizado e e-mail antes de colar. Status sugerido pelo andamento nos grupos.</div>
+<table class="diario"><tr>{''.join(f"<th>{e(c)}</th>" for c in DIARIO_COLUNAS)}</tr>
+{''.join("<tr>" + "".join(f"<td>{e(x)}</td>" for x in linha_diario(o, i + 1)) + "</tr>" for i, o in enumerate(diario)) or '<tr><td colspan=10>Nenhuma ocorrência.</td></tr>'}</table>
+<pre id="diario-tsv" hidden>{e(chr(10).join(chr(9).join(x.replace(chr(10), " ") for x in linha_diario(o, i + 1)) for i, o in enumerate(diario)))}</pre>
+<script>function copiarDiario(b){{navigator.clipboard.writeText(document.getElementById('diario-tsv').textContent).then(()=>b.textContent='Copiado ✓ (cole na coluna Nº da planilha)')}}</script>
 <h2>Manutenções no período</h2><table><tr><th>Início</th><th>Usina</th><th>Atividade</th><th>Situação</th></tr>
 {''.join(f"<tr><td>{e(_hora(a['inicio_ts']))}</td><td>{e(a['usina'])}</td><td>{e(a['descricao'])}</td><td>{e({'andamento': 'em andamento', 'concluida': 'concluída ' + (_hora(a['fim_ts']) if a.get('fim_ts') else ''), 'cancelada': 'cancelada', 'sem_termino': 'sem registro de término'}.get(a['status'], a['status']))}</td></tr>" for a in atv) or '<tr><td colspan=4>Nenhuma registrada pelo COG.</td></tr>'}</table>
 <h2>Visitas a usinas (entrada e saída dos técnicos)</h2><table><tr><th>Técnico</th><th>Usina</th><th>Entrada</th><th>Saída</th><th>Tempo</th></tr>
@@ -233,6 +241,132 @@ th{{font-size:11px;text-transform:uppercase;color:#555}} tr.critico td:nth-child
 
 STATUS_TXT = {"aberto": "em aberto", "a_caminho": "técnico a caminho", "em_atendimento": "em atendimento",
               "em_tratativa": "em tratativa"}
+
+
+# ---- Diário de Bordo do sobreaviso: as mesmas colunas da planilha, para copiar e colar ----
+DIARIO_COLUNAS = ["Nº", "PROJETO / UFV", "O QUE HOUVE?", "TRATATIVAS REALIZADAS", "FORMALIZADO?", "E-MAIL DE FORMALIZAÇÃO",
+                  "TRATATIVAS A SEREM TOMADAS", "RESPONSÁVEL", "STATUS", "OS / EVIDÊNCIAS"]
+_EMOJI = re.compile("[\U0001F000-\U0001FFFF\u2190-\u2BFF\uFE0F\u200d]")
+
+
+def _limpo(t, n=200):
+    t = _EMOJI.sub(" ", str(t or "")).replace("*", " ").replace("_", " ").replace(">", " ").replace("\t", " ")
+    t = " ".join(t.split()).strip(" -–·:")
+    return t if len(t) <= n else t[:n - 1].rstrip() + "…"
+
+
+def _o_que_houve(o):
+    t = (o.get("msg") or {}).get("texto") or ""
+    m = re.search(r"Descri[çc][ãa]o:\s*(.+?)(?:👷|T[ée]cnico acionado|Nossa equipe|Favor confirmar|Manteremos|$)", t)
+    if m:
+        return _limpo(m.group(1), 180)
+    m = re.search(r"Ocorr[êe]ncia:\s*([^*>]+)", t)
+    if m:
+        resto = re.sub(r"^.*?Ocorr[êe]ncia:\s*[^*>]+\*?", "", t, count=1)
+        return _limpo(m.group(1) + (" · " + resto if resto.strip() else ""), 180)
+    return _limpo(re.sub(r"^\s*\*?\s*\*?UFV [^*]+\*", "", t), 180)
+
+
+def _status_diario(o):
+    st = o.get("status") or ("resolvido" if o.get("normalizado") else "aberto")
+    if st == "resolvido":
+        return "Concluído"
+    if st in ("a_caminho", "em_atendimento"):
+        return "Em atendimento"
+    if st == "em_tratativa":
+        mot = coletor_sem_acento(o.get("status_motivo") or "")
+        if re.search(r"peca|material|compra|cabo|equipamento|orcamento|nobreak|inversor novo", mot):
+            return "Pendente - Material"
+        if re.search(r"concession|terceiro|fornecedor|provedor|enel|neoenergia|cemig|light|copel|coelba|energisa|equatorial|cliente|transportadora", mot):
+            return "Pendente - Terceiros"
+        return "Pendente - Equipe"
+    return "Pendente - Equipe"
+
+
+def coletor_sem_acento(t):
+    import unicodedata
+    return "".join(c for c in unicodedata.normalize("NFD", t.lower()) if unicodedata.category(c) != "Mn")
+
+
+def _chave_usina_diario(o):
+    import coletor
+    cod = coletor.chave_codigo(o.get("codigo")) if o.get("codigo") else None
+    if cod:
+        return cod
+    ass = coletor.assinatura(re.sub(r"\s*-\s*[A-Z]{2}\b.*$", "", coletor.rotulo_usina(o.get("usina") or "")))
+    # grupo sem código ("UFV Pradopolis - SP"): o código aprendido do COG com o mesmo nome (PRA100)
+    for c, nome in codigos().items():
+        if coletor.mesma_usina(ass, coletor.assinatura(nome)):
+            return coletor.chave_codigo(c) or c
+    return " ".join(sorted(ass[0])) + "|" + " ".join(sorted(ass[1]))
+
+
+def episodios_diario(ocs, inicio_ts):
+    """Uma linha por atendimento: junta os avisos da mesma usina que se sobrepõem no tempo e deixa de fora
+    o que não é registro de diário (queda curta sem técnico nem OS, e o antigo que só 'fechou' por falta de aviso)."""
+    agora = time.time()
+    fim_de = lambda o: (o.get("normalizado") or {}).get("ts") or agora
+    grupos = {}
+    for o in sorted(ocs, key=lambda o: o["inicio_ts"]):
+        grupos.setdefault(_chave_usina_diario(o), []).append(o)
+    eps = []
+    for lista in grupos.values():
+        atual = None
+        for o in lista:
+            if atual and o["inicio_ts"] <= atual["_fim"] + 1800:
+                atual["_membros"].append(o)
+                atual["_fim"] = max(atual["_fim"], fim_de(o))
+            else:
+                atual = {"_membros": [o], "_fim": fim_de(o)}
+                eps.append(atual)
+    saida = []
+    for ep in eps:
+        ms = ep["_membros"]
+        abertas = [m for m in ms if not m.get("normalizado")]
+        modelo = next((m for m in ms if re.search(r"Descri[çc][ãa]o:|Ocorr[êe]ncia:", (m.get("msg") or {}).get("texto") or "")), None) \
+            or next((m for m in ms if m["sev"] == "critico"), ms[0])
+        com_codigo = next((m for m in ms if m.get("codigo") and str(m["usina"]).startswith(m["codigo"])), None)
+        base = abertas[-1] if abertas else max(ms, key=lambda m: m["normalizado"]["ts"])
+        o = dict(base, usina=(com_codigo or base)["usina"], msg=modelo["msg"], inicio_ts=ms[0]["inicio_ts"],
+                 sev="critico" if any(m["sev"] == "critico" for m in ms) else "alerta",
+                 normalizado=None if abertas else base["normalizado"],
+                 os=sorted({x for m in ms for x in (m.get("os") or [])}),
+                 visitas=list(dict.fromkeys(x for m in ms for x in (m.get("visitas") or []))))
+        norm = o["normalizado"]
+        dura = (norm["ts"] if norm else agora) - o["inicio_ts"]
+        sem_confirmacao = norm and norm.get("motivo") in ("inatividade", "sem_registro")
+        if o["inicio_ts"] < inicio_ts and sem_confirmacao:
+            continue  # antigo que só saiu por falta de aviso: não foi atendimento deste plantão
+        if not (o["sev"] == "critico" or not norm or o["visitas"] or o["os"] or dura >= 3600):
+            continue  # oscilação curta resolvida sozinha
+        saida.append(o)
+    return sorted(saida, key=lambda o: o["inicio_ts"])
+
+
+def linha_diario(o, n):
+    norm = o.get("normalizado")
+    feitas = []
+    if o.get("visitas"):
+        feitas.append("Técnico na usina: " + ", ".join(o["visitas"]))
+    if norm and norm.get("motivo") == "manual":
+        nota = (norm.get("texto") or "").replace("encerrada no painel", "").strip(" :")
+        feitas.append(f"Encerrada no painel {_hora(norm['ts'])}" + (f": {_limpo(nota, 120)}" if nota else ""))
+    elif norm and norm.get("motivo") in ("inatividade", "sem_registro"):
+        feitas.append(f"Sem confirmação de normalização nos grupos (sem novidade desde {_hora(o.get('ultima_ts') or norm['ts'])})")
+    elif norm:
+        feitas.append(f"Normalizada {_hora(norm['ts'])} ({norm.get('de') or ''}): {_limpo(norm.get('texto'), 140)}")
+    elif o.get("status_motivo") and o.get("status") in ("a_caminho", "em_atendimento") and o.get("status_origem") != "manual":
+        feitas.append(_limpo(o["status_motivo"], 140))
+    if norm:
+        a_fazer = "N/A"
+    elif o.get("status") == "em_tratativa" and o.get("status_origem") == "manual":
+        a_fazer = "A definir (ficou para outro momento)"
+    elif o.get("status") == "em_tratativa" and o.get("status_motivo"):
+        a_fazer = _limpo(re.sub(r"^\s*\*[^*]{0,80}\*", "", o["status_motivo"].split(": ", 1)[-1]), 160)
+    else:
+        a_fazer = "Acompanhar até a normalização"
+    return [str(n), _limpo(o.get("usina"), 60), _o_que_houve(o), " · ".join(feitas) or "—", "Não", "Grupo WhatsApp",
+            a_fazer, "", _status_diario(o), ", ".join(o.get("os") or [])]
 
 
 def _clima(o):

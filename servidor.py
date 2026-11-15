@@ -230,18 +230,24 @@ STATUS = {"aberto": "Em aberto", "a_caminho": "Técnico a caminho", "em_atendime
 TRATATIVA_PERGUNTA = 24 * 3600  # em tratativa: pergunta se continua só depois de 24 h sem novidade
 
 
+OS_NUM = re.compile(r"\bOS\b\W{0,4}(\d{4,6})\b", re.I)
+
+
 def status_automatico(o, presencas, jids_usina):
     """Andamento lido nos grupos: entrada/saída do técnico na usina e frases ("em deslocamento", "verificando",
-    "amanhã", "aguardando peça"). Devolve (ts, status, motivo) do sinal mais recente, ou None."""
+    "amanhã", "aguardando peça"). Devolve (ts, status, motivo) do sinal mais recente, ou None.
+    De quebra, anota em o["os"] as OS citadas e em o["visitas"] os técnicos que passaram na usina."""
     ini = o["inicio_ts"] - 600
     fim = (o.get("normalizado") or {}).get("ts") or time.time()
-    sinais = []
+    sinais, oss, visitas = [], set(o.get("os") or []), []
     for p in presencas:
         mesma = p.get("chave_usina") == o.get("chave_usina") or (
             o.get("codigo") and p.get("codigo") and coletor.chave_codigo(p["codigo"]) == coletor.chave_codigo(o["codigo"]))
         if not mesma or p["entrada_ts"] > fim or (p.get("saida_ts") and p["saida_ts"] < ini):
             continue
         sinais.append((max(p["entrada_ts"], ini), "em_atendimento", f"{p['tecnico']} entrou na usina às {time.strftime('%H:%M', time.localtime(p['entrada_ts']))}"))
+        visitas.append(f"{p['tecnico']} {time.strftime('%d/%m %H:%M', time.localtime(p['entrada_ts']))}"
+                       + (f"–{time.strftime('%H:%M', time.localtime(p['saida_ts']))}" if p.get("saida_ts") and not p.get("sem_saida") else ""))
         if p.get("saida_ts") and not p.get("sem_saida") and p["saida_ts"] <= fim:
             sinais.append((p["saida_ts"], "aberto", f"{p['tecnico']} saiu da usina às {time.strftime('%H:%M', time.localtime(p['saida_ts']))} sem baixa"))
     ids = set(o.get("ids") or [])
@@ -252,10 +258,14 @@ def status_automatico(o, presencas, jids_usina):
             if not (ini <= m.get("ts", 0) <= fim) or not (da_usina or m.get("id") in ids):
                 continue
             t = coletor.sem_acento(coletor.texto(m))
+            oss.update(OS_NUM.findall(coletor.texto(m)))
             st = coletor.status_da_mensagem(t)
             if st:
                 quem = "você" if m.get("sender") == "me" else (m.get("sender") or "?")
                 sinais.append((m["ts"], st, f"{quem}: {coletor.texto(m)[:120]}"))
+    o["os"] = sorted(oss)
+    if visitas:
+        o["visitas"] = visitas
     return max(sinais, key=lambda x: x[0]) if sinais else None
 
 
@@ -265,6 +275,9 @@ def aplicar_status(ocorrencias, presencas, acoes, usinas):
     por_msg = acoes_por_mensagem(acoes)
     for o in ocorrencias:
         if o.get("normalizado"):
+            if not o.get("os_lidas"):  # OS e visitas, uma vez, para o Diário de Bordo
+                status_automatico(o, presencas, jids_usina)
+                o["os_lidas"] = True
             o["status"], o["status_origem"], o["status_motivo"] = "resolvido", "auto", None
             continue
         manual = acoes.get("st:" + o["chave"])
