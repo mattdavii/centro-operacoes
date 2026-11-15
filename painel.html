@@ -211,6 +211,9 @@
   .st-sel.st-resolvido { background: #0b2a1d; color: #bbf7d0; border-color: #1e7a4c; }
   .st-sel option { background: #0b1226; color: #e6edff; }
   .st-motivo { font-size: 11px; color: var(--fraco); margin-top: 2px; }
+  .painel.tratativa { border-color: #5c4a00; } .painel.tratativa > h2 { color: #fde68a; }
+  .sub-trat { font-size: 10px; letter-spacing: .5px; color: var(--fraco); font-weight: 600; }
+  .oc .motivo-trat { font-size: 12px; color: #fde68a; margin-top: 3px; }
   .tag.clima { color: #cfeaff; background: #123a52; }
   .tag.clima.severo { color: #ffe4c4; background: #6b2d0a; }
   .tag.inmet { color: #1a1300; background: var(--cor-inmet, #fbbf24); }
@@ -500,11 +503,17 @@
       <span class="legenda-st"><span><i style="background:var(--vermelho)"></i>CRÍTICA</span><span><i style="background:var(--amarelo)"></i>ALERTA</span><span><i style="background:var(--verde)"></i>NORMALIZADA</span><span><i style="background:#64748b"></i>INATIVIDADE</span><span><i style="background:#3987e5"></i>MANUTENÇÃO</span></span></h2>
     <div class="tl"><div class="tl-eixo" id="tl-eixo"></div><div class="tl-linhas" id="tl-linhas"></div></div>
   </section>
+  <div class="coluna">
   <section class="painel">
     <h2>OCORRÊNCIAS · 24H <span class="qtd" id="q-oc">0</span>
       <span class="dir"><button class="aba sel" data-filtro="abertas">ABERTAS</button><button class="aba" data-filtro="normalizadas">NORMALIZADAS</button><button class="aba" data-filtro="todas">TODAS</button></span></h2>
     <div class="corpo alto" id="ocorrencias"></div>
   </section>
+  <section class="painel tratativa" id="painel-tratativa" hidden>
+    <h2>⏳ EM TRATATIVA <span class="qtd" id="q-trat">0</span><span class="dir sub-trat">ficam para outro momento · sem alarme repetido</span></h2>
+    <div class="corpo medio" id="tratativa"></div>
+  </section>
+  </div>
 
   <div class="coluna">
     <section class="painel">
@@ -867,8 +876,9 @@ function desenhar() {
 
   // ocorrências
   const listaOc = filtroOc === "abertas" ? abertas : filtroOc === "normalizadas" ? normalizadas : deUsina;
-  $("q-oc").textContent = abertas.length;
-  $("ocorrencias").innerHTML = listaOc.map(o => {
+  $("q-oc").textContent = abertas.filter(o => o.status !== "em_tratativa").length;
+  const emTratativa = abertas.filter(o => o.status === "em_tratativa").sort((a, b) => (b.status_ts || 0) - (a.status_ts || 0));
+  const cardOc = o => {
     const classe = o.normalizado ? (o.normalizado.motivo === "inatividade" ? "normalizado inatividade" : "normalizado") : o.sev;
     const nova = recemChegados.has("oc:" + o.chave + ":" + o.sev) || (!o.normalizado && !o.ciente && agora() - o.ultima_ts < 1800);
     const tempo = o.normalizado ? `durou ${dur(o.normalizado.ts - o.inicio_ts)}` : dur(agora() - o.inicio_ts);
@@ -882,6 +892,7 @@ function desenhar() {
           ${o.durante_manutencao ? `<span class="tag manut" title="Começou com uma manutenção em andamento na usina">🔧 DURANTE MANUTENÇÃO: ${esc(o.durante_manutencao.descricao).toUpperCase()}</span>` : ""}
           ${tagsClima(o)}</div>
         <div class="texto">${esc(o.msg.texto)}</div>
+        ${o.status === "em_tratativa" && !o.normalizado && o.status_motivo ? `<div class="motivo-trat">⏳ ${o.status_origem === "manual" ? "Definido por você" + (o.status_ts ? " às " + hm(o.status_ts) : "") : esc(o.status_motivo)}</div>` : ""}
         <div class="quem">${esc(o.msg.de)} · ${hm(o.msg.ts || o.inicio_ts)} · <span title="${esc(o.grupos.join("\n"))}">${esc(o.grupos.length > 1 ? o.grupos[0] + " +" + (o.grupos.length - 1) : o.grupos[0])}</span></div>
         ${o.normalizado ? `<div class="norm">✔ ${hm(o.normalizado.ts)} ${esc(o.normalizado.de)}: ${esc(o.normalizado.texto.slice(0, 140))}</div>` : ""}
         ${o.confirmar ? `<div class="pergunta">⏸ Sem novidades há ${dur(agora() - o.confirmar.desde)}. Continua com o mesmo status?
@@ -892,7 +903,12 @@ function desenhar() {
         <span style="display:flex;gap:4px">${!o.normalizado && !o.ciente ? `<button data-oc="ciente" title="Para o alarme; a ocorrência continua aberta">CIENTE</button>` : ""}
         ${!o.normalizado ? `<button data-oc="encerrar" title="Fecha a ocorrência (resolvida sem aviso no grupo)">ENCERRAR</button>` : ""}
         ${o.normalizado ? `<button data-oc="reabrir" title="A baixa foi errada: volta a ficar aberta">REABRIR</button>` : ""}</span></div></div>`;
-  }).join("") || `<div class="vazio">${filtroOc === "abertas" ? "Nenhuma ocorrência aberta nas últimas 24 h. ✅" : "Nada aqui."}</div>`;
+  };
+  $("ocorrencias").innerHTML = listaOc.filter(o => filtroOc !== "abertas" || o.status !== "em_tratativa").map(cardOc).join("")
+    || `<div class="vazio">${filtroOc === "abertas" ? (emTratativa.length ? "Nenhuma ocorrência aberta fora as em tratativa. ✅" : "Nenhuma ocorrência aberta nas últimas 24 h. ✅") : "Nada aqui."}</div>`;
+  $("painel-tratativa").hidden = !emTratativa.length;
+  $("q-trat").textContent = emTratativa.length;
+  $("tratativa").innerHTML = emTratativa.map(cardOc).join("");
   // avisos de grupo geral sem usina identificada: à parte, sem alarme
   if (semUsina.length && filtroOc !== "normalizadas") {
     $("ocorrencias").insertAdjacentHTML("beforeend", `<details class="sem-usina"><summary>💬 Avisos em grupos gerais sem usina identificada · ${semUsina.length}</summary>
