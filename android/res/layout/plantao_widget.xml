@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Painel do plantão: widget da tela inicial e notificação fixa da tela de bloqueio (mesmo desenho) -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/pw_raiz"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:orientation="vertical" android:background="@drawable/fundo_widget" android:padding="12dp">
+    <TextView android:id="@+id/pw_titulo" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:text="CENTRO DE OPERAÇÕES" android:textColor="#56CCFF" android:textSize="11sp" android:textStyle="bold"
+        android:maxLines="1" android:ellipsize="end" />
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:orientation="horizontal" android:layout_marginTop="8dp">
+        <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:layout_marginEnd="6dp"
+            android:orientation="vertical" android:gravity="center" android:background="@drawable/fundo_contador"
+            android:paddingTop="6dp" android:paddingBottom="6dp">
+            <TextView android:id="@+id/pw_crit" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="–" android:textColor="#FF4D5E" android:textSize="24sp" android:textStyle="bold" android:fontFamily="monospace" />
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="CRÍTICAS" android:textColor="#8FA3C7" android:textSize="9sp" android:textStyle="bold" android:maxLines="1" />
+        </LinearLayout>
+        <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:layout_marginEnd="6dp"
+            android:orientation="vertical" android:gravity="center" android:background="@drawable/fundo_contador"
+            android:paddingTop="6dp" android:paddingBottom="6dp">
+            <TextView android:id="@+id/pw_alerta" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="–" android:textColor="#FBBF24" android:textSize="24sp" android:textStyle="bold" android:fontFamily="monospace" />
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="ALERTAS" android:textColor="#8FA3C7" android:textSize="9sp" android:textStyle="bold" android:maxLines="1" />
+        </LinearLayout>
+        <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:layout_marginEnd="6dp"
+            android:orientation="vertical" android:gravity="center" android:background="@drawable/fundo_contador"
+            android:paddingTop="6dp" android:paddingBottom="6dp">
+            <TextView android:id="@+id/pw_trat" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="–" android:textColor="#FDE68A" android:textSize="24sp" android:textStyle="bold" android:fontFamily="monospace" />
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="TRATATIVA" android:textColor="#8FA3C7" android:textSize="9sp" android:textStyle="bold" android:maxLines="1" />
+        </LinearLayout>
+        <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+            android:orientation="vertical" android:gravity="center" android:background="@drawable/fundo_contador"
+            android:paddingTop="6dp" android:paddingBottom="6dp">
+            <TextView android:id="@+id/pw_campo" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="–" android:textColor="#B49BFF" android:textSize="24sp" android:textStyle="bold" android:fontFamily="monospace" />
+            <TextView android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:text="EM CAMPO" android:textColor="#8FA3C7" android:textSize="9sp" android:textStyle="bold" android:maxLines="1" />
+        </LinearLayout>
+    </LinearLayout>
+    <TextView android:id="@+id/pw_linhas" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:layout_marginTop="8dp" android:textColor="#E6EDFF" android:textSize="12sp" android:maxLines="5" android:ellipsize="end"
+        android:lineSpacingExtra="2dp" />
+    <TextView android:id="@+id/pw_rodape" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:layout_marginTop="6dp" android:textColor="#8FA3C7" android:textSize="10sp" android:maxLines="2" android:ellipsize="end" />
+</LinearLayout>

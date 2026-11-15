@@ -52,6 +52,29 @@ def _plantao_gravar(p):
     os.replace(tmp, PLANTAO)
 
 
+def resumo_celular(p):
+    """O que o painel do plantão do celular mostra (tela de bloqueio e widget): contadores e as abertas mais importantes."""
+    abertas = [o for o in p.get("ocorrencias", []) if not o.get("normalizado") and not o.get("generico")]
+    ativas = [o for o in abertas if o.get("status") != "em_tratativa"]
+    ordem = {"critico": 0, "alerta": 1}
+    ativas.sort(key=lambda o: (ordem.get(o["sev"], 2), -o["ultima_ts"]))
+    rot = {"aberto": "em aberto", "a_caminho": "técnico a caminho", "em_atendimento": "em atendimento"}
+    linhas = [("🔴 " if o["sev"] == "critico" else "🟡 ") + coletor.rotulo_usina(o["usina"])[:28] + " · " + rot.get(o.get("status"), "em aberto")
+              for o in ativas[:4]]
+    if len(ativas) > 4:
+        linhas.append(f"+ {len(ativas) - 4} outras")
+    try:
+        avisos = sorted({a["descricao"] for a in clima.resumo()["avisos"] if clima._em_vigor(a)})
+    except Exception:
+        avisos = []
+    pl = p.get("plantao") or {}
+    return {"plantao": bool(pl.get("ativo")), "inicio_ts": pl.get("inicio_ts"), "titulo": pl.get("titulo") or "Plantão",
+            "criticas": sum(o["sev"] == "critico" for o in ativas), "alertas": sum(o["sev"] != "critico" for o in ativas),
+            "tratativa": len(abertas) - len(ativas),
+            "em_campo": len([x for x in p.get("presencas") or [] if not x.get("saida_ts")]),
+            "linhas": linhas, "inmet": avisos, "quando": p.get("quando")}
+
+
 def ler_plantao():
     """Plantão atual (iniciado no botão do painel) e os anteriores, com o relatório de cada um.
     plantao.json: {"atual": {"inicio_ts", "titulo", "equipe"} | null, "historico": [{..., "fim_ts", "relatorio"}]}"""
@@ -741,6 +764,7 @@ class Pagina(http.server.BaseHTTPRequestHandler):
                                + teste_alarme(),
                 "confirmar": [{"chave": o["chave"], "usina": o["usina"], "desde": o["confirmar"]["desde"]}
                               for o in p["ocorrencias"] if o.get("confirmar") and not o["normalizado"]],
+                "painel": resumo_celular(p),
                 "marcacoes": [{"chave": a["chave"], "nome": a["nome"], "desde_ts": a["desde_ts"],
                                "texto": (a["previa"][0] if a["previa"] else {}).get("texto", "")[:200]}
                               for a in p["aguardando"] if a.get("motivo") == "marcou você"],

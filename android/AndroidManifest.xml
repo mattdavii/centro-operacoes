@@ -48,6 +48,19 @@
                 android:value="Monitoramento de ocorrências das usinas para o plantão" />
         </service>
 
+        <!-- widget "Plantão" da tela inicial (o AlertaService atualiza a cada minuto) -->
+        <receiver
+            android:name=".PlantaoWidget"
+            android:label="Plantão"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/plantao_widget_info" />
+        </receiver>
+
         <receiver
             android:name=".BootReceiver"
             android:exported="true">

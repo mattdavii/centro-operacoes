@@ -38,6 +38,8 @@ public class AlertaService extends Service {
     private static final String CANAL_CRITICO = "critico_v2";  // v2: toque "alarme industrial" do próprio app
     private static final String CANAL_AVISO = "avisos";
     private static final String CANAL_SILENCIO = "silencio";  // horário de silêncio: aparece, mas sem som nem vibração
+    private static final String CANAL_PLANTAO = "plantao_tela";  // painel do plantão na tela de bloqueio (sem som)
+    private static final int ID_PLANTAO = 50;
     private int silencioInicio = 20, silencioFim = 7;
     private static final int ID_MONITOR = 1;
     private static final long REFORCO_MS = 5 * 60 * 1000L;
@@ -121,6 +123,11 @@ public class AlertaService extends Service {
         } catch (Exception e) {
             String quando = ultimoContato > 0 ? " · último contato " + hora(ultimoContato) : "";
             atualizarMonitor("PC offline ou fora do Tailscale" + quando, null);
+            try {
+                String salvo = prefs.getString("painel_json", null);
+                if (salvo != null) desenharPainel(new JSONObject(salvo), "⚠️ sem contato com o PC" + quando);
+            } catch (Exception ignorada) {
+            }
             // 10 min sem falar com o PC: avisa uma vez (alarme no plantão, aviso fora dele)
             long agora = System.currentTimeMillis();
             long desde = ultimoContato > 0 ? ultimoContato : inicioServico;  // nunca falou com o PC: conta desde que o app abriu
@@ -229,6 +236,11 @@ public class AlertaService extends Service {
             nm.notify(998, n);
         }
 
+        JSONObject painel = d.optJSONObject("painel");
+        if (painel != null) {
+            prefs.edit().putString("painel_json", painel.toString()).apply();
+            desenharPainel(painel, "open".equals(d.optString("whatsapp")) ? null : "⚠️ WhatsApp do PC desconectado");
+        }
         String wa = "open".equals(d.optString("whatsapp")) ? "" : " · WhatsApp do PC desconectado";
         String titulo = (plantao ? "● Plantão ativo · " : "Monitorando · ") + criticas + " crítica(s) · " + alertas + " alerta(s)";
         atualizarMonitor(titulo, "Atualizado " + hora(agora) + wa);
@@ -256,6 +268,13 @@ public class AlertaService extends Service {
         sil.setDescription("Ocorrências e avisos que chegam no horário de silêncio: sem som e sem vibração");
         sil.setSound(null, null);
         sil.enableVibration(false);
+        NotificationChannel pl = new NotificationChannel(CANAL_PLANTAO, "Painel do plantão (tela de bloqueio)", NotificationManager.IMPORTANCE_DEFAULT);
+        pl.setDescription("Resumo fixo do plantão: críticas, alertas, em tratativa e técnicos em campo. Só aparece com o plantão ativo.");
+        pl.setSound(null, null);
+        pl.enableVibration(false);
+        pl.setShowBadge(false);
+        pl.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
+        nm.createNotificationChannel(pl);
         nm.createNotificationChannel(sil);
         nm.createNotificationChannel(mon);
         nm.createNotificationChannel(crit);
@@ -276,6 +295,39 @@ public class AlertaService extends Service {
                 .setContentIntent(abrirApp());
         if (texto != null) b.setContentText(texto);
         return b.build();
+    }
+
+    /** Widget da tela inicial + painel fixo na tela de bloqueio (este só com o plantão ativo). */
+    private void desenharPainel(JSONObject p, String extra) {
+        try {
+            PlantaoWidget.atualizar(this, p, extra);
+        } catch (Exception ignorada) {
+        }
+        NotificationManager nm = getSystemService(NotificationManager.class);
+        if (!p.optBoolean("plantao")) {
+            nm.cancel(ID_PLANTAO);
+            return;
+        }
+        int crit = p.optInt("criticas"), alert = p.optInt("alertas");
+        StringBuilder texto = new StringBuilder("⏳ " + p.optInt("tratativa") + " em tratativa · 👷 " + p.optInt("em_campo") + " em campo");
+        JSONArray inmet = p.optJSONArray("inmet");
+        if (inmet != null && inmet.length() > 0) texto.append(" · ⚠️ INMET");
+        if (extra != null) texto.append(" · ").append(extra);
+        Notification n = new Notification.Builder(this, CANAL_PLANTAO)
+                .setSmallIcon(R.drawable.ic_notif)
+                .setContentTitle((crit > 0 ? "🔴 " : "● ") + "Plantão · " + crit + " crítica" + (crit == 1 ? "" : "s") + " · " + alert + " alerta" + (alert == 1 ? "" : "s"))
+                .setContentText(texto)
+                .setStyle(new Notification.DecoratedCustomViewStyle())
+                .setCustomBigContentView(PlantaoWidget.montar(this, p, extra))
+                .setOngoing(true)
+                .setOnlyAlertOnce(true)
+                .setShowWhen(false)
+                .setVisibility(Notification.VISIBILITY_PUBLIC)
+                .setCategory(Notification.CATEGORY_STATUS)
+                .setColor(crit > 0 ? 0xFFFF4D5E : 0xFF56CCFF)
+                .setContentIntent(abrirApp())
+                .build();
+        nm.notify(ID_PLANTAO, n);
     }
 
     private void atualizarMonitor(String titulo, String texto) {
