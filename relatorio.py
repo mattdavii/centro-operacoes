@@ -51,6 +51,29 @@ def registrar(ocorrencias, codigos):
     return hist
 
 
+MANUT = os.path.join(DADOS, "manutencoes.json")
+VISITAS = os.path.join(DADOS, "visitas.json")
+
+
+def registrar_manutencoes(atividades, presencas):
+    """Guarda atividades e visitas (entrada/saída) para o relatório de plantão e os indicadores (45 dias)."""
+    limite = time.time() - GUARDAR
+    janela = time.time() - 24 * 3600 + 600
+    for arq, itens, ts in ((MANUT, atividades, "inicio_ts"), (VISITAS, presencas, "entrada_ts")):
+        hist = _ler(arq, {})
+        atuais = {i["chave"] for i in itens}
+        hist = {k: v for k, v in hist.items() if (k in atuais or v.get(ts, 0) < janela) and v.get(ts, 0) >= limite}
+        for i in itens:
+            hist[i["chave"]] = i
+        _gravar(arq, hist)
+
+
+def manutencoes_periodo(inicio_ts, fim_ts):
+    atv = [a for a in _ler(MANUT, {}).values() if a["inicio_ts"] <= fim_ts and (a.get("fim_ts") or time.time()) >= inicio_ts]
+    vis = [v for v in _ler(VISITAS, {}).values() if v["entrada_ts"] <= fim_ts and (v.get("saida_ts") or time.time()) >= inicio_ts]
+    return sorted(atv, key=lambda a: a["inicio_ts"]), sorted(vis, key=lambda v: v["entrada_ts"])
+
+
 def codigos():
     return _ler(CODIGOS, {})
 
@@ -119,6 +142,20 @@ def montar(inicio_ts, fim_ts, painel, plantao=None):
             t.append(f"• {o['usina']}: {_hora(o['inicio_ts'])} → {_hora(o['normalizado']['ts'])} "
                      f"({_dur(o['normalizado']['ts'] - o['inicio_ts'])})" + ({"manual": " [encerrada no painel]", "inatividade": " [baixa por inatividade, sem confirmação]"}.get((o.get("normalizado") or {}).get("motivo"), "")))
         t.append("")
+    atv, vis = manutencoes_periodo(inicio_ts, fim_ts)
+    if atv:
+        t.append("*🔧 Manutenções no período:*")
+        nomes_st = {"andamento": "em andamento", "concluida": "concluída", "cancelada": "cancelada", "sem_termino": "sem registro de término"}
+        for a in atv:
+            t.append(f"• {a['usina']}: {a['descricao']} ({nomes_st.get(a['status'], a['status'])}, {_hora(a['inicio_ts'])}"
+                     + (f" → {_hora(a['fim_ts'])}" if a.get("fim_ts") and a["status"] != "andamento" else "") + ")")
+        t.append("")
+    if vis:
+        t.append(f"*👷 Visitas a usinas:* {len(vis)}")
+        for v in vis[:25]:
+            fim_v = v.get("saida_ts")
+            t.append(f"• {v['tecnico']} em {v['usina']}: {_hora(v['entrada_ts'])}" + (f" → {_hora(fim_v)}" if fim_v else " (ainda lá)"))
+        t.append("")
     if aguardando:
         t.append("*💬 Conversas aguardando resposta:*")
         for p in aguardando:
@@ -165,6 +202,10 @@ th{{font-size:11px;text-transform:uppercase;color:#555}} tr.critico td:nth-child
 {linha_do_tempo(ocs, inicio_ts, min(fim_ts, agora))}
 <h2>Ocorrências do período</h2><table><tr><th>Início</th><th>Usina</th><th>Nível</th><th>O que aconteceu</th><th>Situação</th><th>Duração</th></tr>
 {''.join(linha(o) for o in ocs) or '<tr><td colspan=6>Nenhuma ocorrência registrada.</td></tr>'}</table>
+<h2>Manutenções no período</h2><table><tr><th>Início</th><th>Usina</th><th>Atividade</th><th>Situação</th></tr>
+{''.join(f"<tr><td>{e(_hora(a['inicio_ts']))}</td><td>{e(a['usina'])}</td><td>{e(a['descricao'])}</td><td>{e({'andamento': 'em andamento', 'concluida': 'concluída ' + (_hora(a['fim_ts']) if a.get('fim_ts') else ''), 'cancelada': 'cancelada', 'sem_termino': 'sem registro de término'}.get(a['status'], a['status']))}</td></tr>" for a in atv) or '<tr><td colspan=4>Nenhuma registrada pelo COG.</td></tr>'}</table>
+<h2>Visitas a usinas (entrada e saída dos técnicos)</h2><table><tr><th>Técnico</th><th>Usina</th><th>Entrada</th><th>Saída</th><th>Tempo</th></tr>
+{''.join(f"<tr><td>{e(v['tecnico'])}</td><td>{e(v['usina'])}</td><td>{e(_hora(v['entrada_ts']))}</td><td>{e(_hora(v['saida_ts'])) if v.get('saida_ts') and not v.get('sem_saida') else ('sem registro' if v.get('sem_saida') else 'ainda lá')}</td><td>{_dur((v.get('saida_ts') or agora) - v['entrada_ts'])}</td></tr>" for v in vis) or '<tr><td colspan=5>Nenhuma registrada.</td></tr>'}</table>
 <h2>Usinas com mais ocorrências</h2><table><tr><th>Usina</th><th>Ocorrências</th></tr>{''.join(f'<tr><td>{e(u)}</td><td>{n}</td></tr>' for u, n in top) or '<tr><td colspan=2>—</td></tr>'}</table>
 <h2>Conversas aguardando resposta</h2><table><tr><th>Conversa</th><th>Esperando há</th><th>Última mensagem</th></tr>
 {''.join(f"<tr><td>{e(p['nome'])}</td><td>{_dur(agora - p['desde_ts'])}</td><td>{e((p['previa'] or [{}])[-1].get('texto', ''))[:160]}</td></tr>" for p in aguardando) or '<tr><td colspan=3>Nenhuma.</td></tr>'}</table>

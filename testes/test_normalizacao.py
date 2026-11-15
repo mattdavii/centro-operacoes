@@ -92,6 +92,25 @@ for frase, so_com in [("Comunicação do Relé LT retornou", True), ("Comunicaç
     if coletor.so_comunicacao(coletor.sem_acento(frase)) != so_com:
         erros += 1
         print("✗ só comunicação errado:  ", frase)
-total = 5 + len(DA_BAIXA) + len(NAO_DA_BAIXA) + len(NAO_E_OCORRENCIA) + len(E_OCORRENCIA) + 2
+# manutenções (atividade do COG) e técnicos em campo (entrada/saída)
+for frase, esperado in [
+    ("* *UFV GOY100* *⚙️🧰 Atividade: Roçada* > Trackers do 12 ao 24 movidos", ("atividade_inicio", "Roçada", None, None)),
+    ("*UFV GOY100 – GOY100* *⚙️🟩 Atividade concluída: Roçada* > Trackers liberados", ("atividade_fim", "Roçada", None, None)),
+    ("*UFV JIB100 – Jaíba 100* *⚙️🟥 🧰 Atividade cancelada: Preventiva Anual. > Devido", ("atividade_cancelada", "Preventiva Anual", None, None)),
+    ("Entrada da 07:54 UFV São Pedro", ("entrada", None, "07:54", "São Pedro")),
+    ("Saída UFV- Porteiras", ("saida", None, None, "Porteiras")),
+    ("Entrada UFV GOY800 às 14:55", ("entrada", None, "14:55", "GOY800")),
+    ("Entrada UFV PTY 100 13:02 Ryan", ("entrada", None, "13:02", "PTY 100")),
+    ("Saída de corrente do inversor 3 zerada", None),
+    ("*UFV GOY100* > Trackers liberados > Horário de término da atividade: 17h22min", None),
+]:
+    if coletor.classificar_manutencao(frase) != esperado:
+        erros += 1
+        print("✗ manutenção/presença:   ", frase, "→", coletor.classificar_manutencao(frase))
+# atividade de manutenção não é ocorrência nem normalização
+if coletor.classificar(coletor.sem_acento("*UFV GOY100 – GOY100* *⚙️🟩 Atividade concluída: Roçada*")) == "normal" and \
+   coletor.classificar_manutencao("*UFV GOY100 – GOY100* *⚙️🟩 Atividade concluída: Roçada*") is None:
+    erros += 1
+total = 10 + 5 + len(DA_BAIXA) + len(NAO_DA_BAIXA) + len(NAO_E_OCORRENCIA) + len(E_OCORRENCIA) + 2
 print(f"{total - erros}/{total} casos certos")
 sys.exit(1 if erros else 0)

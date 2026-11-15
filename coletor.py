@@ -218,6 +218,42 @@ PARADA_NOME = re.compile(r"^(relig|normaliz|restabelec|reestabelec|desarm|parad|
                          r"segue|tripou|caiu|teve|apresent|precis|esta|gerando|operando|online|offline|ok)", re.I)
 
 
+# ---------- manutenções e técnicos em campo ----------
+ATIVIDADE = re.compile(r"(?<![DdNn]a )(?<![Dd]e )(?<![Dd]o )atividade\s*(conclu[íi]da|finalizada|encerrada|cancelada|adiada)?\s*:\s*([^>*\n]{3,80})", re.I)
+PRESENCA = re.compile(r"^\s*(entrada|sa[ií]da|chegada)\b\s*(?:(?:da|de|do|em|na|no|as|às|a)\s+)?"
+                      r"(\d{1,2}[:h]\d{2})?\s*(?:(?:em|na|no|da|de|do|à|a)\s+)?(.*)$", re.I)
+
+
+def classificar_manutencao(bruto):
+    """Atividade do COG ("⚙️🧰 Atividade: Roçada" / "Atividade concluída: ..." / "Atividade cancelada: ...") ou
+    entrada/saída de técnico ("Entrada da 07:54 UFV São Pedro", "Saída UFV- Porteiras").
+    Devolve (tipo, descrição, hora 'HH:MM' ou None, usina citada ou None) ou None."""
+    a = ATIVIDADE.search(bruto)
+    if a and ("⚙" in bruto or "🧰" in bruto or bruto.lstrip("* ").lower().startswith(("atividade", "ufv"))):
+        estado = sem_acento((a.group(1) or "").lower())
+        tipo = "atividade_cancelada" if estado in ("cancelada", "adiada") else "atividade_fim" if estado else "atividade_inicio"
+        return tipo, a.group(2).strip(" .:*-"), None, None
+    linha = bruto.strip().split("\n")[0]
+    p = PRESENCA.match(linha)
+    if p and len(linha) <= 90:
+        tipo = "entrada" if sem_acento(p.group(1).lower()).startswith(("entrada", "chegad")) else "saida"
+        resto = re.sub(r"^\s*UFVs?\s*[-–:]?\s*", "", p.group(3) or "", flags=re.I).strip(" .!,;")
+        resto = re.split(r"[.,;!]|\s{2,}", resto)[0].strip()
+        # horário escrito depois do nome ("UFV GOY800 às 14:55", "UFV PTY 100 13:02 Ryan"): sai do nome e vira a hora
+        h2 = re.search(r"\s*(?:\b(?:às|as|a partir das)\s*)?(\d{1,2})[:h](\d{2})\b.*$", resto)
+        hora_depois = None
+        if h2:
+            hora_depois = f"{int(h2.group(1)):02d}:{h2.group(2)}"
+            resto = resto[:h2.start()].strip(" -–,")
+        if resto and (len(resto) > 40 or re.search(r"\b(corrente|tensao|tensão|dados|energia|inversor)\b", resto, re.I)):
+            return None  # "saída de corrente", "entrada de energia"... não é técnico chegando
+        if resto and not (resto[0].isupper() or resto[0].isdigit()):
+            resto = ""  # "entrada na usina": sem nome; vale a usina do grupo
+        hora = p.group(2).replace("h", ":") if p.group(2) else hora_depois
+        return tipo, None, hora, (resto or None)
+    return None
+
+
 def extrair_nome_usina(bruto):
     """'UFV Monsenhor Tabosa religada.' -> 'Monsenhor Tabosa'. Só palavras com inicial maiúscula (ou números) logo
     depois de 'UFV', parando em palavras de status. None se a mensagem não nomeia uma usina."""
@@ -329,6 +365,33 @@ def operacao(chat, dados, agora=None, janela=None):
         t = sem_acento(bruto)
         if not t or t.startswith("["):
             continue
+        man = classificar_manutencao(bruto)
+        if man:
+            mtipo, descricao, hora, citada = man
+            cod = CODIGO.search(bruto)
+            if cod:
+                nome_cod = re.split(r"[\u2190-\u2bff\U0001F000-\U0001FFFF]|\.\s|\s{2,}|Local:|OS:", cod.group(2) or "")[0].strip(" .,;:*")
+                m_usina, m_chave = (f"{cod.group(1)} – {nome_cod}" if nome_cod else cod.group(1)), cod.group(1)
+            elif de_uma_usina:
+                m_usina, m_chave = rotulo_usina(nome), chat["jid"]
+            elif citada or extrair_nome_usina(bruto):
+                citada = citada or extrair_nome_usina(bruto)
+                m_usina, m_chave = "UFV " + citada, "nome:" + citada
+            else:
+                m_usina = m_chave = None  # sem saber a usina: a saída ainda serve para fechar a presença de quem saiu
+            ts = m["ts"]
+            if hora:  # "Entrada da 07:54": vale o horário escrito, no dia da mensagem
+                try:
+                    h, mi = (int(x) for x in hora.split(":"))
+                    d = dt.datetime.fromtimestamp(m["ts"]).replace(hour=h, minute=mi, second=0)
+                    ts = int(d.timestamp()) if abs(d.timestamp() - m["ts"]) < 6 * 3600 else m["ts"]
+                except ValueError:
+                    pass
+            eventos.append({"tipo": mtipo, "ts": ts, "id": m.get("id"), "jid": chat["jid"], "grupo": nome,
+                            "usina": m_usina or nome[:38], "chave_usina": m_chave or ("sem_usina:" + chat["jid"]),
+                            "msg": compacta(m), "descricao": descricao, "quem": m.get("sender") or "?",
+                            "codigo": cod.group(1) if cod else None, "nome_codigo": None})
+            continue
         tipo = classificar(t)
         if tipo == "normal" and desmentida(m, base):
             tipo = None
@@ -411,7 +474,7 @@ def montar_ocorrencias(eventos, usinas, vinculos=None):
     dono = vincular_codigos(usinas, vinculos)
     por_codigo = dict(dono)
     for e in eventos:
-        if e["chave_usina"] == e["jid"]:
+        if e["chave_usina"] == e["jid"] or str(e["chave_usina"]).startswith(("tecnico:", "sem_usina:", "nome:")):
             continue
         cod = e["chave_usina"]
         if cod not in por_codigo:
@@ -439,6 +502,8 @@ def montar_ocorrencias(eventos, usinas, vinculos=None):
         e["chave_usina"] = resolvidos[citada]
     ocorrencias, abertas, boletins = [], {}, []
     for e in sorted(eventos, key=lambda e: e["ts"]):
+        if e["tipo"] not in ("critico", "alerta", "normal", "boletim"):
+            continue  # atividades e entrada/saída: montar_manutencoes
         k = e["chave_usina"]
         if e["tipo"] == "boletim":
             boletins.append(e)
@@ -513,6 +578,81 @@ def montar_ocorrencias(eventos, usinas, vinculos=None):
         u.pop("ocorrencias", None)
         u.pop("assinatura", None)
     return ocorrencias, todas, boletins
+
+
+ATIVIDADE_MAX = 14 * 3600  # atividade sem "concluída" depois disso sai como "sem registro de término"
+PRESENCA_MAX = 14 * 3600   # entrada sem saída depois disso deixa de contar como "em campo"
+
+
+def montar_manutencoes(eventos, usinas, ocorrencias, agora=None):
+    """Atividades do COG (início → concluída/cancelada) e técnicos em campo (entrada → saída), por usina.
+    Marca as ocorrências que começaram com uma atividade em andamento na mesma usina ("durante manutenção")."""
+    agora = agora or time.time()
+    atividades, abertas = [], {}
+    for e in sorted((e for e in eventos if e["tipo"].startswith("atividade_")), key=lambda e: e["ts"]):
+        k = e["chave_usina"]
+        if e["tipo"] == "atividade_inicio":
+            a = abertas.get(k)
+            if a and a["status"] == "andamento" and sem_acento(a["descricao"].lower()) == sem_acento((e["descricao"] or "").lower()):
+                a["grupos"] = sorted(set(a["grupos"]) | {e["grupo"]})  # o mesmo aviso em outro grupo
+                continue
+            a = {"chave": f"atv|{k}|{e['id']}", "chave_usina": k, "usina": e["usina"], "codigo": e.get("codigo"),
+                 "descricao": e["descricao"] or "Atividade", "inicio_ts": e["ts"], "fim_ts": None, "status": "andamento",
+                 "grupos": [e["grupo"]], "msg": e["msg"], "fim_msg": None}
+            abertas[k] = a
+            atividades.append(a)
+        else:
+            a = abertas.get(k)
+            if a and a["status"] == "andamento":
+                a["status"] = "concluida" if e["tipo"] == "atividade_fim" else "cancelada"
+                a["fim_ts"], a["fim_msg"] = e["ts"], e["msg"]
+            elif not a:  # concluída/cancelada sem o início no período lido
+                atividades.append({"chave": f"atv|{k}|{e['id']}", "chave_usina": k, "usina": e["usina"], "codigo": e.get("codigo"),
+                                   "descricao": e["descricao"] or "Atividade", "inicio_ts": e["ts"], "fim_ts": e["ts"],
+                                   "status": "concluida" if e["tipo"] == "atividade_fim" else "cancelada",
+                                   "grupos": [e["grupo"]], "msg": e["msg"], "fim_msg": e["msg"]})
+    for a in atividades:
+        if a["status"] == "andamento" and agora - a["inicio_ts"] > ATIVIDADE_MAX:
+            a["status"], a["fim_ts"] = "sem_termino", a["inicio_ts"] + ATIVIDADE_MAX
+
+    presencas, por_pessoa = [], {}
+    for e in sorted((e for e in eventos if e["tipo"] in ("entrada", "saida")), key=lambda e: e["ts"]):
+        quem = sem_acento(e["quem"])
+        aberta = por_pessoa.get(quem)
+        if e["tipo"] == "entrada":
+            if aberta and aberta["chave_usina"] == e["chave_usina"] and not aberta["saida_ts"]:
+                continue  # repetiu a entrada
+            if aberta and not aberta["saida_ts"]:
+                aberta["saida_ts"] = e["ts"]  # entrou em outra usina: saiu da anterior
+            if str(e["chave_usina"]).startswith("sem_usina:"):
+                continue  # entrada sem dizer onde, num grupo geral
+            p = {"chave": f"pres|{quem}|{e['id']}", "tecnico": e["quem"], "chave_usina": e["chave_usina"], "usina": e["usina"],
+                 "codigo": e.get("codigo"), "entrada_ts": e["ts"], "saida_ts": None, "grupo": e["grupo"]}
+            por_pessoa[quem] = p
+            presencas.append(p)
+        elif aberta and not aberta["saida_ts"]:
+            aberta["saida_ts"] = e["ts"]
+    for p in presencas:
+        # sem saída registrada (ou fechada só por uma entrada dias depois): não conta horas em campo
+        if (not p["saida_ts"] and agora - p["entrada_ts"] > PRESENCA_MAX) or \
+           (p["saida_ts"] and p["saida_ts"] - p["entrada_ts"] > PRESENCA_MAX):
+            p["saida_ts"], p["sem_saida"] = p["entrada_ts"] + PRESENCA_MAX, True
+
+    # ocorrência que começou com atividade em andamento na mesma usina: era esperada (não toca alarme)
+    for o in ocorrencias:
+        o["durante_manutencao"] = None
+        for a in atividades:
+            if a["chave_usina"] == o["chave_usina"] and a["inicio_ts"] - 600 <= o["inicio_ts"] and \
+               (a["status"] == "andamento" or (a["fim_ts"] or 0) >= o["inicio_ts"]):
+                o["durante_manutencao"] = {"descricao": a["descricao"], "ate_agora": a["status"] == "andamento"}
+                break
+    # estado de manutenção no quadro de usinas
+    for u in usinas:
+        u["manutencao"] = next((a["descricao"] for a in atividades if a["chave_usina"] == u["jid"] and a["status"] == "andamento"), None)
+        u["em_campo"] = [p["tecnico"] for p in presencas if p["chave_usina"] == u["jid"] and not p["saida_ts"]]
+    atividades.sort(key=lambda a: (a["status"] != "andamento", -a["inicio_ts"]))
+    presencas.sort(key=lambda p: (p["saida_ts"] is not None, -p["entrada_ts"]))
+    return atividades, presencas
 
 
 def diario(qual):
@@ -591,6 +731,7 @@ def coletar(cache=None, dias=DIAS, log=print):
     pendentes.sort(key=lambda i: i["desde_ts"])
     codigos = {e["codigo"]: e["nome_codigo"] for e in sorted(eventos, key=lambda e: e["ts"]) if e.get("codigo") and e.get("nome_codigo")}
     ocorrencias, usinas, boletins = montar_ocorrencias(eventos, usinas, vinculos)
+    atividades, presencas = montar_manutencoes(eventos, usinas, ocorrencias)
     cod_grupo = {u["jid"]: u.get("codigo") for u in usinas if u.get("codigo")}
     for o in ocorrencias:  # o código do COG, quando houver, para achar a usina no mapa
         o["codigo"] = cod_grupo.get(o["chave_usina"]) or \
@@ -616,7 +757,8 @@ def coletar(cache=None, dias=DIAS, log=print):
         f"{len(ocorrencias)} ocorrências, {len(chamados)} chamados, {len(tarefas)} tarefas"
         + (f", {len(erros)} erro(s)" if erros else ""))
     return {"quando": int(time.time()), "whatsapp": status(), "pendentes": pendentes,
-            "ocorrencias": ocorrencias[:120], "usinas": usinas, "boletins": boletins[:6], "codigos": codigos, "feed": feed[:60], "atividade": atividade,
+            "ocorrencias": ocorrencias[:120], "usinas": usinas, "boletins": boletins[:6], "codigos": codigos,
+            "atividades": atividades[:80], "presencas": presencas[:120], "feed": feed[:60], "atividade": atividade,
             "chamados": chamados, "tarefas": tarefas, "erros": erros}
 
 

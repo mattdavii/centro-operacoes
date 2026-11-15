@@ -4,6 +4,7 @@ Painel de plantão para equipes de O&M de usinas solares que usam o **wa-app** (
 Ele lê os grupos e conversas e mostra, ao vivo:
 
 - **Ocorrências** detectadas nas mensagens (desarme, trip, falha, sem comunicação…), agrupadas por usina, com baixa automática só quando a normalização é confirmada (COG 🟩, "usina religada", "pode encerrar a OS").
+- **Manutenções e técnicos em campo**: atividades do COG (início, concluída, cancelada) e entrada/saída dos técnicos nas usinas; ocorrência que começa durante uma manutenção é marcada e não toca alarme.
 - **Conversas aguardando você** (privado, ou grupo onde te marcaram/citaram).
 - **Mapa** das usinas (a partir do seu KMZ), com os técnicos mais próximos de cada ocorrência.
 - **Indicadores**: ocorrências por dia, usinas reincidentes, tempo até normalizar, tipos de falha, por cliente.

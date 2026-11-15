@@ -169,6 +169,11 @@ def main():
         ["<b>Baixa automática</b>", "Só com normalização confirmada: o \"Normalização\" do COG, \"usina religada\", \"pode encerrar a OS\". Pergunta, "
          "negação, intenção ou \"parece que voltou\" não fecham. Alerta sem aviso por 6 h sai por inatividade; crítica de "
          "usina só fecha com confirmação (ou 24 h sem nenhum aviso, como \"sem registro\")."],
+        ["<b>Em campo · Manutenções</b>", "Quem está em qual usina agora (pelas mensagens \"Entrada em UFV ...\" / \"Saída\") e as "
+         "atividades do COG do dia (em andamento, concluída, cancelada). Aparecem também no mapa, na linha do tempo (barras azuis), "
+         "no relatório do plantão e nos indicadores."],
+        ["<b>Durante manutenção</b>", "Ocorrência que começa com uma atividade em andamento na mesma usina ganha a etiqueta e não "
+         "toca alarme no celular. Se a atividade acabar e a usina continuar com problema, o alarme volta."],
         ["<b>Aguardando você</b>", "Privados em que a última mensagem não é sua e grupos em que te marcaram ou citaram seu nome. "
          "Respondi / Resolvido / Lembrar / Ignorar limpam a lista."],
         ["<b>Linha do tempo</b>", "Cada ocorrência do aviso até a normalização: vê de relance o que está aberto há mais tempo."],

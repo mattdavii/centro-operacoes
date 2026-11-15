@@ -117,8 +117,31 @@ def calcular(dias, cliente, painel, mapa):
             x = por_tec.setdefault(t.get("tecnico") or "—", {"tecnico": t.get("tecnico") or "—", "abertas": 0, "concluidas": 0})
             x["abertas" if coletor.aberto(t.get("status"), "tarefa") else "concluidas"] += 1
 
+    # manutenções e visitas (entrada/saída) no período
+    atv = [a for a in relatorio._ler(relatorio.MANUT, {}).values() if a["inicio_ts"] >= inicio]
+    vis = [v for v in relatorio._ler(relatorio.VISITAS, {}).values() if v["entrada_ts"] >= inicio]
+    for i in (painel.get("atividades") or []):
+        if i["inicio_ts"] >= inicio and i["chave"] not in {a["chave"] for a in atv}:
+            atv.append(i)
+    visitas_usina, horas_tecnico = {}, {}
+    for v in vis:
+        u = visitas_usina.setdefault(v["usina"], {"usina": v["usina"], "visitas": 0})
+        u["visitas"] += 1
+        horas = ((v.get("saida_ts") or agora) - v["entrada_ts"]) / 3600 if not v.get("sem_saida") else 0
+        tec = horas_tecnico.setdefault(v["tecnico"], {"tecnico": v["tecnico"], "horas": 0.0, "visitas": 0})
+        tec["horas"] = round(tec["horas"] + max(0, horas), 1)
+        tec["visitas"] += 1
+    manut_tipo = {}
+    for a in atv:
+        manut_tipo[a["descricao"]] = manut_tipo.get(a["descricao"], 0) + 1
+
     return {
-        "dias": dias, "cliente": cliente, "clientes": clientes, "inicio": int(inicio), "passo": passo,
+        "dias": dias, "cliente": cliente,
+        "manutencoes": {"total": len(atv), "concluidas": sum(a["status"] == "concluida" for a in atv),
+                        "canceladas": sum(a["status"] == "cancelada" for a in atv), "visitas": len(vis)},
+        "manut_tipo": sorted(({"tipo": k, "n": n} for k, n in manut_tipo.items()), key=lambda x: -x["n"])[:10],
+        "visitas_usina": sorted(visitas_usina.values(), key=lambda u: -u["visitas"])[:10],
+        "horas_tecnico": sorted(horas_tecnico.values(), key=lambda t: -t["horas"])[:10], "clientes": clientes, "inicio": int(inicio), "passo": passo,
         "importado_desde": int(min([o["inicio_ts"] for o in hist.values()] or [agora])),
         "resumo": {
             "total": len(ocs), "criticas": sum(o["sev"] == "critico" for o in ocs),

@@ -58,7 +58,8 @@ def main():
     hist = relatorio._ler(relatorio.HIST, {})
     if "--substituir" in sys.argv:
         # refaz o passado com as regras atuais: tira o que não é do painel ao vivo e grava de novo
-        hist = {k: v for k, v in hist.items() if v.get("ultima_ts", 0) >= limite_ao_vivo and not v.get("importada")}
+        hist = {k: v for k, v in hist.items()
+                if (v.get("ultima_ts", 0) >= limite_ao_vivo and not v.get("importada")) or v.get("inicio_ts", 0) < inicio}
     novas = 0
     for o in ocorrencias:
         if o["ultima_ts"] < limite_ao_vivo and not o.get("generico") and o["chave"] not in hist:
@@ -66,6 +67,17 @@ def main():
             hist[o["chave"]] = o
             novas += 1
     relatorio._gravar(relatorio.HIST, hist)
+    # manutenções do COG e visitas (entrada/saída) do mesmo período
+    atividades, presencas = coletor.montar_manutencoes(eventos, usinas, ocorrencias, agora=agora)
+    for arq, itens, campo in ((relatorio.MANUT, atividades, "inicio_ts"), (relatorio.VISITAS, presencas, "entrada_ts")):
+        h = relatorio._ler(arq, {})
+        if "--substituir" in sys.argv:
+            h = {k: v for k, v in h.items() if v.get(campo, 0) >= limite_ao_vivo or v.get(campo, 0) < inicio}
+        for i in itens:
+            if i[campo] < limite_ao_vivo and i["chave"] not in h:
+                h[i["chave"]] = i
+        relatorio._gravar(arq, h)
+    print(f"manutenções: {len(atividades)} · visitas: {len(presencas)}", flush=True)
     print(f"pronto: {total} mensagens lidas, {len(ocorrencias)} ocorrências no período, {novas} novas no histórico "
           f"(total {len(hist)})", flush=True)
 

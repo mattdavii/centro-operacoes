@@ -3,7 +3,7 @@
 # Sincroniza com o wa-app (só leitura) a cada minuto e serve a página em http://127.0.0.1:47900
 # As marcações feitas no painel (respondi, resolvido, ignorar, lembrar depois) ficam em acoes.json,
 # só neste computador; nada é escrito no WhatsApp nem na planilha.
-import hmac, http.server, ipaddress, json, mimetypes, os, sys, threading, time, traceback, urllib.parse
+import hmac, http.server, ipaddress, json, mimetypes, os, re, sys, threading, time, traceback, urllib.parse
 
 PASTA = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, PASTA)
@@ -127,6 +127,7 @@ def montar():
         "chamados_fechados": fechados(d["chamados"])[:40], "tarefas_fechadas": fechados(d["tarefas"])[:20],
         "ocorrencias": ocorrencias, "usinas": usinas, "boletins": d["boletins"], "feed": d["feed"], "atividade": d["atividade"],
         "plantao": ler_plantao(), "silencio": ler_silencio(),
+        "atividades": d.get("atividades") or [], "presencas": d.get("presencas") or [],
         "perfil": perfil(),
     }
 
@@ -191,6 +192,10 @@ def ocorrencias_com_acoes(d, acoes):
     for o in ocorrencias:
         if not o.get("codigo"):
             o["codigo"] = por_jid.get(o["chave_usina"])
+    for lista in (d.get("atividades") or [], d.get("presencas") or []):
+        for i in lista:
+            if not i.get("codigo"):
+                i["codigo"] = por_jid.get(i["chave_usina"]) or (i["chave_usina"] if re.fullmatch(r"[A-Z]{2,4}\d{3}", str(i["chave_usina"])) else None)
     return ocorrencias, usinas
 
 
@@ -489,7 +494,9 @@ class Pagina(http.server.BaseHTTPRequestHandler):
             return self.responder(200, versoes())
         if caminho in ("/", "/index.html", "/painel.html"):
             with open(os.path.join(PASTA, "painel.html"), "rb") as f:
-                return self.responder(200, f.read(), "text/html; charset=utf-8")
+                pagina = f.read()
+            marca = f'<meta name="versao-tela" content="{versoes()["tela"]}">'.encode()
+            return self.responder(200, pagina.replace(b"<head>", b"<head>" + marca, 1), "text/html; charset=utf-8")
         if caminho == "/api/indicadores":
             try:
                 dias = max(1, min(45, int(q.get("dias", ["7"])[0])))
@@ -499,7 +506,7 @@ class Pagina(http.server.BaseHTTPRequestHandler):
                 painel = montar()
                 d = estado["dados"] or {}
                 base = {"ocorrencias": painel.get("ocorrencias", []), "chamados": d.get("chamados", []),
-                        "tarefas": d.get("tarefas", [])}
+                        "tarefas": d.get("tarefas", []), "atividades": d.get("atividades", [])}
             if not painel.get("pronto"):
                 return self.responder(200, {"pronto": False})
             return self.responder(200, indicadores.calcular(dias, q.get("cliente", [""])[0], base, dados_mapa()))
@@ -560,8 +567,11 @@ class Pagina(http.server.BaseHTTPRequestHandler):
                 "pronto": True, "quando": p["quando"], "whatsapp": (p.get("whatsapp") or {}).get("conexao"),
                 "app_versao": versoes()["app"], "silencio": ler_silencio(),
                 "plantao": (p.get("plantao") or {}).get("ativo"),
-                "ocorrencias": [{"chave": o["chave"], "sev": o["sev"], "usina": o["usina"], "texto": o["msg"]["texto"][:200],
-                                 "inicio_ts": o["inicio_ts"], "ciente": o["ciente"]} for o in p["ocorrencias"] if not o["normalizado"]]
+                "ocorrencias": [{"chave": o["chave"], "usina": o["usina"], "inicio_ts": o["inicio_ts"], "ciente": o["ciente"],
+                                 "sev": "alerta" if (o.get("durante_manutencao") or {}).get("ate_agora") else o["sev"],
+                                 "texto": (f"🔧 durante manutenção ({o['durante_manutencao']['descricao']}): "
+                                           if (o.get("durante_manutencao") or {}).get("ate_agora") else "") + o["msg"]["texto"][:200]}
+                                for o in p["ocorrencias"] if not o["normalizado"]]
                                + teste_alarme(),
                 "marcacoes": [{"chave": a["chave"], "nome": a["nome"], "desde_ts": a["desde_ts"],
                                "texto": (a["previa"][0] if a["previa"] else {}).get("texto", "")[:200]}
@@ -614,6 +624,7 @@ class Pagina(http.server.BaseHTTPRequestHandler):
                     painel = montar()
                     if painel.get("pronto"):
                         relatorio.registrar(painel["ocorrencias"], estado["dados"].get("codigos"))
+                        relatorio.registrar_manutencoes(painel.get("atividades") or [], painel.get("presencas") or [])
                     item = plantao_finalizar(painel)
                     if not item:
                         return self.responder(400, {"erro": "não há plantão ativo"})
@@ -657,6 +668,7 @@ def registrar(painel):
         return
     try:
         relatorio.registrar(painel["ocorrencias"], estado["dados"].get("codigos"))
+        relatorio.registrar_manutencoes(painel.get("atividades") or [], painel.get("presencas") or [])
     except Exception:
         traceback.print_exc()
 

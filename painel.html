@@ -185,6 +185,15 @@
   @media (max-width: 1000px) { #vista-mapa { grid-template-columns: 1fr; padding: 10px 12px; } #mapa { height: 60vh; } }
 
   .no-app #btn-tela, .no-app .so-pc { display: none; }
+  /* manutenções e técnicos em campo */
+  .tag.manut { color: #cfe3ff; background: #12306b; }
+  .campo-sub { font-size: 10px; letter-spacing: 1.2px; color: var(--rotulo); font-weight: 700; margin: 2px 0 6px; }
+  .campo { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; padding: 6px 2px; border-bottom: 1px solid #0f1b38; font-size: 12px; }
+  .campo b { color: var(--titulo); } .campo .q { color: var(--fraco); font-size: 11px; }
+  .campo .t { font-family: var(--mono); font-size: 11px; color: var(--azul); text-align: right; white-space: nowrap; }
+  .st.manut-andamento { background: #12306b; color: #9cc8ff; } .st.manut-ok { background: #0b2a1d; color: var(--verde); }
+  .st.manut-cancel { background: #1d2333; color: #94a3b8; }
+  .usi .icones { position: absolute; bottom: 5px; right: 6px; font-size: 11px; }
   .modal { position: fixed; z-index: 70; top: 50%; left: 50%; transform: translate(-50%, -50%); width: min(640px, 94vw);
            background: #060c1c; border: 1px solid var(--linha-forte); border-radius: 14px; padding: 18px 20px; box-shadow: 0 20px 60px #000c; }
   .modal h3 { margin: 0 0 12px; font-size: 14px; letter-spacing: 2px; color: var(--titulo); }
@@ -376,6 +385,15 @@
     <section class="painel"><h2>OCORRÊNCIAS POR CLIENTE</h2>
       <div class="graf-sub">Cliente pela pasta do KMZ; "sem cliente" = usina ainda sem código ligado.</div>
       <div class="corpo"><div class="hbarras" id="g-clientes"></div></div></section>
+    <section class="painel"><h2>MANUTENÇÕES NO PERÍODO <span class="qtd" id="q-manut">0</span></h2>
+      <div class="graf-sub" id="manut-resumo"></div>
+      <div class="corpo"><div class="hbarras" id="g-manut"></div></div></section>
+    <section class="painel"><h2>VISITAS POR USINA</h2>
+      <div class="graf-sub">Entradas registradas pelos técnicos ("Entrada em UFV ...").</div>
+      <div class="corpo"><div class="hbarras" id="g-visitas"></div></div></section>
+    <section class="painel largo"><h2>HORAS EM CAMPO POR TÉCNICO</h2>
+      <div class="graf-sub">Da entrada até a saída; entradas sem saída registrada não contam horas.</div>
+      <div class="corpo"><div class="hbarras" id="g-horas"></div></div></section>
     <section class="painel largo"><h2>CHAMADOS DO DIÁRIO POR MÊS</h2>
       <div class="corpo"><div class="legenda-g"><span><i style="background:var(--verde)"></i>Resolvido</span><span><i style="background:var(--amarelo)"></i>Em andamento</span><span><i style="background:var(--vermelho)"></i>Pendente</span></div>
         <div class="colunas" id="g-meses" style="height:150px"></div><div class="eixo-x" id="g-meses-x"></div></div></section>
@@ -389,7 +407,7 @@
 <main id="vista-painel">
   <section class="painel tl-painel" id="painel-tl">
     <h2><span id="t-tl">LINHA DO TEMPO · 24 H</span> <span class="qtd" id="q-tl">0</span>
-      <span class="legenda-st"><span><i style="background:var(--vermelho)"></i>CRÍTICA</span><span><i style="background:var(--amarelo)"></i>ALERTA</span><span><i style="background:var(--verde)"></i>NORMALIZADA</span><span><i style="background:#64748b"></i>INATIVIDADE</span></span></h2>
+      <span class="legenda-st"><span><i style="background:var(--vermelho)"></i>CRÍTICA</span><span><i style="background:var(--amarelo)"></i>ALERTA</span><span><i style="background:var(--verde)"></i>NORMALIZADA</span><span><i style="background:#64748b"></i>INATIVIDADE</span><span><i style="background:#3987e5"></i>MANUTENÇÃO</span></span></h2>
     <div class="tl"><div class="tl-eixo" id="tl-eixo"></div><div class="tl-linhas" id="tl-linhas"></div></div>
   </section>
   <section class="painel">
@@ -404,6 +422,13 @@
       <div class="corpo medio"><div class="quadro" id="quadro"></div>
         <div class="legenda"><span><i style="background:var(--vermelho)"></i>crítica</span><span><i style="background:var(--amarelo)"></i>alerta</span>
           <span><i style="background:var(--verde)"></i>normalizada</span><span><i style="background:#2b7a5a"></i>sem ocorrência</span><span><i style="background:var(--cinza)"></i>sem mensagens 24h</span></div></div>
+    </section>
+    <section class="painel">
+      <h2>EM CAMPO · MANUTENÇÕES <span class="qtd" id="q-campo">0</span></h2>
+      <div class="corpo medio">
+        <div class="campo-sub">👷 TÉCNICOS EM CAMPO AGORA</div><div id="em-campo"></div>
+        <div class="campo-sub" style="margin-top:10px">🔧 MANUTENÇÕES · 24 H</div><div id="manutencoes"></div>
+      </div>
     </section>
     <section class="painel">
       <h2>MENSAGENS POR HORA · 24H <span class="qtd" id="q-msgs">0</span></h2>
@@ -539,7 +564,7 @@ function verificarNovos(d) {
     if (!p.fechamento && !vistos.has(k)) novos.push(["ag", p, k]);
   }
   if (!primeira) {
-    const crit = novos.filter(([t, o]) => t === "oc" && o.sev === "critico");
+    const crit = novos.filter(([t, o]) => t === "oc" && o.sev === "critico" && !(o.durante_manutencao && o.durante_manutencao.ate_agora));
     const marc = novos.filter(([t, p]) => t === "ag" && p.motivo === "marcou você");
     if (crit.length) { notificar(`🚨 ${crit[0][1].usina}`, crit[0][1].msg.texto.slice(0, 160), true); ultimoReforco = Date.now(); }
     else if (marc.length) notificar(`📣 ${marc[0][1].nome} te marcou`, (marc[0][1].previa[0] || {}).texto || "", false);
@@ -615,7 +640,8 @@ function desenhar() {
       <div class="barra"></div>
       <div style="min-width:0">
         <div class="topo"><span class="usina">${esc(o.usina)}</span><span class="sev">${o.normalizado ? motivoBaixa(o) : o.sev === "critico" ? "CRÍTICA" : "ALERTA"}</span>
-          ${o.qtd > 1 ? `<span class="tag">${o.qtd} AVISOS</span>` : ""}${o.ciente ? `<span class="tag">CIENTE</span>` : ""}</div>
+          ${o.qtd > 1 ? `<span class="tag">${o.qtd} AVISOS</span>` : ""}${o.ciente ? `<span class="tag">CIENTE</span>` : ""}
+          ${o.durante_manutencao ? `<span class="tag manut" title="Começou com uma manutenção em andamento na usina">🔧 DURANTE MANUTENÇÃO: ${esc(o.durante_manutencao.descricao).toUpperCase()}</span>` : ""}</div>
         <div class="texto">${esc(o.msg.texto)}</div>
         <div class="quem">${esc(o.msg.de)} · ${esc(o.grupos.join(" · "))}</div>
         ${o.normalizado ? `<div class="norm">✔ ${hm(o.normalizado.ts)} ${esc(o.normalizado.de)}: ${esc(o.normalizado.texto.slice(0, 140))}</div>` : ""}
@@ -632,7 +658,8 @@ function desenhar() {
     const dica = `${u.grupo}\n${u.ultima ? "última: " + dhm(u.ultima_ts) + " " + u.ultima.de + ": " + u.ultima.texto : ""}`;
     const meta = u.abertas ? `${u.abertas} aberta${u.abertas > 1 ? "s" : ""}` : u.msgs_24h != null ? `${u.msgs_24h} msgs` : "via COG";
     return `<div class="usi ${u.estado}" title="${esc(dica)}"><div class="n">${esc(u.nome.replace(/^UFVs?\s+/i, ""))}</div>
-      <div class="m">${meta}${u.ultima_ts ? " · " + dur(agora() - u.ultima_ts) : ""}</div></div>`;
+      <div class="m">${meta}${u.ultima_ts ? " · " + dur(agora() - u.ultima_ts) : ""}</div>
+      ${u.manutencao || (u.em_campo || []).length ? `<span class="icones" title="${esc([u.manutencao ? "Manutenção: " + u.manutencao : "", (u.em_campo || []).length ? "Em campo: " + u.em_campo.join(", ") : ""].filter(Boolean).join("\n"))}">${u.manutencao ? "🔧" : ""}${(u.em_campo || []).length ? "👷" : ""}</span>` : ""}</div>`;
   }).join("");
 
   // gráfico de atividade
@@ -652,6 +679,7 @@ function desenhar() {
   $("det-adiados").style.display = d.adiados.length ? "" : "none";
 
   desenharLista(chamados7);
+  desenharCampo();
   desenharLinhaDoTempo();
   aplicarPerfil();
 
@@ -951,6 +979,17 @@ function desenharMapa(enquadrar) {
     if (e === "critico") L.marker([p.lat, p.lon], { interactive: false, icon: L.divIcon({ className: "pino-pulso", iconSize: [14, 14] }) }).addTo(camadas.usinas);
     marcadores[p.nome] = m;
   });
+  const pontoDo = cod => cod && usinasKmz.find(p => chaveCodigo(p.nome) === chaveCodigo(String(cod).split("/")[0]));
+  (dados.atividades || []).filter(a => a.status === "andamento").forEach(a => {
+    const p = pontoDo(a.codigo); if (!p) return;
+    L.circleMarker([p.lat, p.lon], { radius: 14, color: "#3987e5", weight: 3, fill: false, dashArray: "4 3" })
+      .bindTooltip(`🔧 ${a.descricao}`, { direction: "top" }).addTo(camadas.usinas);
+  });
+  (dados.presencas || []).filter(p => !p.saida_ts).forEach(pr => {
+    const p = pontoDo(pr.codigo); if (!p) return;
+    L.marker([p.lat, p.lon], { icon: L.divIcon({ className: "", html: `<div style="font-size:18px;transform:translate(10px,-14px)">👷</div>`, iconSize: [20, 20] }) })
+      .bindPopup(`<b>${esc(pr.tecnico)}</b><div style="color:var(--fraco)">em campo desde ${dhm(pr.entrada_ts)}</div>`).addTo(camadas.tecnicos);
+  });
   tecnicos.forEach(t => L.circleMarker([t.lat, t.lon], { radius: 4, color: "#b49bff", weight: 2, fillColor: "#2a1d55", fillOpacity: 1 })
     .bindPopup(`<b>${esc(t.nome)}</b><div style="color:var(--fraco)">Técnico · ${esc(t.grupo)}</div>`).addTo(camadas.tecnicos));
   kmz.pontos.filter(p => p.categoria === "base").forEach(b => L.marker([b.lat, b.lon], { icon: L.divIcon({ className: "", html: `<div style="width:12px;height:12px;background:#56ccff;border:2px solid #03060f;transform:rotate(45deg)"></div>`, iconSize: [12, 12] }) })
@@ -1130,7 +1169,16 @@ function desenharLinhaDoTempo() {
   const fmtEixo = t => { const x = new Date(t * 1000); return x.getHours() === 0 ? x.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" }) : String(x.getHours()).padStart(2, "0") + "h"; };
   $("tl-eixo").innerHTML = marcas.map(t => `<span style="left:${pos(t)}%">${fmtEixo(t)}</span>`).join("");
   const grade = marcas.map(t => `<div class="tl-grade" style="left:${pos(t)}%"></div>`).join("") + `<div class="tl-agora" style="left:100%"></div>`;
-  $("tl-linhas").innerHTML = ocs.length ? ocs.map(o => {
+  const manut = (d.atividades || []).filter(a => (a.fim_ts || agoraS) >= ini).map(a => ({ manut: true, ...a }));
+  const linhas = [...ocs, ...manut].sort((a, b) => a.inicio_ts - b.inicio_ts);
+  $("q-tl").textContent = linhas.length;
+  $("tl-linhas").innerHTML = linhas.length ? linhas.map(o => {
+    if (o.manut) {
+      const fim = o.fim_ts || agoraS, cor = o.status === "cancelada" || o.status === "sem_termino" ? "#64748b" : "#3987e5";
+      const dica = `🔧 ${o.usina}\n${o.descricao}\n${dhm(o.inicio_ts)} → ${o.fim_ts ? dhm(o.fim_ts) : "em andamento"} · ${dur(fim - o.inicio_ts)}`;
+      return `<div class="tl-linha" data-dica="${esc(dica)}" style="cursor:default"><div class="tl-nome">🔧 ${esc(o.usina)}</div>
+        <div class="tl-trilho">${grade}<div class="tl-barra ${o.fim_ts ? "" : "aberta"}" style="--cor:${cor};left:${pos(o.inicio_ts)}%;width:${Math.max(0.6, pos(fim) - pos(o.inicio_ts))}%"></div></div></div>`;
+    }
     const fim = o.normalizado ? o.normalizado.ts : agoraS;
     const motivo = (o.normalizado || {}).motivo;
     const cor = !o.normalizado ? (o.sev === "critico" ? "var(--vermelho)" : "var(--amarelo)") : motivo === "inatividade" ? "#64748b" : "var(--verde)";
@@ -1138,9 +1186,27 @@ function desenharLinhaDoTempo() {
     const dica = `${o.usina}\n${estado}\n${dhm(o.inicio_ts)} → ${o.normalizado ? dhm(fim) : "agora"} · ${dur(fim - o.inicio_ts)}\n${o.msg.texto.slice(0, 120)}`;
     return `<div class="tl-linha" data-tl="${esc(o.chave)}" data-dica="${esc(dica)}"><div class="tl-nome">${esc(o.usina)}</div>
       <div class="tl-trilho">${grade}<div class="tl-barra ${o.normalizado ? "" : "aberta"}" style="--cor:${cor};left:${pos(o.inicio_ts)}%;width:${Math.max(0.6, pos(fim) - pos(o.inicio_ts))}%"></div></div></div>`;
-  }).join("") : `<div class="vazio">Nenhuma ocorrência no período.</div>`;
+  }).join("") : `<div class="vazio">Nenhuma ocorrência ou manutenção no período.</div>`;
 }
 document.addEventListener("click", ev => { const l = ev.target.closest("[data-tl]"); if (l) abrirDetalhe(l.dataset.tl); });
+
+/* ---------- técnicos em campo e manutenções ---------- */
+function desenharCampo() {
+  const d = dados, agoraS = agora();
+  const emCampo = (d.presencas || []).filter(p => !p.saida_ts);
+  const atv = (d.atividades || []).filter(a => a.status === "andamento" || (a.fim_ts || a.inicio_ts) >= agoraS - 86400);
+  $("q-campo").textContent = emCampo.length + atv.filter(a => a.status === "andamento").length;
+  $("em-campo").innerHTML = emCampo.map(p => `<div class="campo"><span><b>${esc(p.tecnico)}</b> <span class="q">em ${esc(p.usina)}</span></span>
+      <span class="t" title="entrou ${dhm(p.entrada_ts)}">há ${dur(agoraS - p.entrada_ts)}</span></div>`).join("")
+    || `<div class="vazio">Ninguém registrou entrada em usina agora.</div>`;
+  const rotulo = { andamento: ["EM ANDAMENTO", "manut-andamento"], concluida: ["CONCLUÍDA", "manut-ok"], cancelada: ["CANCELADA", "manut-cancel"], sem_termino: ["SEM TÉRMINO", "manut-cancel"] };
+  $("manutencoes").innerHTML = atv.map(a => { const [r, c] = rotulo[a.status] || ["", ""];
+    const fim = a.fim_ts ? ` → ${hm(a.fim_ts)}` : "";
+    return `<div class="campo" data-dica="${esc(a.usina + "\n" + a.descricao + "\n" + dhm(a.inicio_ts) + fim + "\n" + (a.msg ? a.msg.texto.slice(0, 160) : ""))}">
+      <span><b>${esc(a.usina)}</b> <span class="st ${c}">${r}</span><br><span class="q">${esc(a.descricao)}</span></span>
+      <span class="t">${hm(a.inicio_ts)}${fim}</span></div>`; }).join("")
+    || `<div class="vazio">Nenhuma manutenção registrada pelo COG nas últimas 24 h.</div>`;
+}
 
 /* ---------- indicadores ---------- */
 let indDias = 7, indCliente = "";
@@ -1210,6 +1276,13 @@ function desenharIndicadores(d) {
     i => i.mes);
   barrasH("g-ch-usina", d.chamados_usina.map(u => Object.assign({}, u, { resolvidos: u.total - u.abertos })), u => u.usina,
     [{ campo: "abertos", nome: "Abertos", cor: "var(--vermelho)" }, { campo: "resolvidos", nome: "Resolvidos", cor: AZUL_SERIE }]);
+  const m = d.manutencoes || { total: 0, concluidas: 0, canceladas: 0, visitas: 0 };
+  $("q-manut").textContent = m.total;
+  $("manut-resumo").textContent = `${m.concluidas} concluídas · ${m.canceladas} canceladas · ${m.visitas} visitas de técnicos`;
+  barrasH("g-manut", d.manut_tipo || [], t => t.tipo, [{ campo: "n", nome: "Atividades", cor: AZUL_SERIE }], null, "Nenhuma atividade do COG no período.");
+  barrasH("g-visitas", d.visitas_usina || [], u => u.usina, [{ campo: "visitas", nome: "Visitas", cor: AZUL_SERIE }], null, "Nenhuma entrada registrada no período.");
+  barrasH("g-horas", d.horas_tecnico || [], t => t.tecnico, [{ campo: "horas", nome: "Horas em campo", cor: AZUL_SERIE }],
+    t => t.horas.toLocaleString("pt-BR") + " h", "Nenhuma visita no período.");
   barrasH("g-tarefas", d.tarefas_tecnico, t => t.tecnico,
     [{ campo: "abertas", nome: "Abertas", cor: "var(--amarelo)" }, { campo: "concluidas", nome: "Concluídas", cor: "var(--verde)" }]);
 }
@@ -1267,6 +1340,19 @@ async function verificarVersaoPC() {
 }
 verificarVersaoPC();
 setInterval(verificarVersaoPC, 30 * 60000);
+
+// a tela mudou no servidor (atualização, ou a página veio da cópia offline): recarrega sozinha
+let telaCarregada = (document.querySelector('meta[name="versao-tela"]') || {}).content || null;
+async function conferirTela() {
+  if (window.CentroApp) return;  // no app Android quem cuida disso é o index.html
+  try {
+    const v = await (await fetch(BASE + "/api/versao", { headers: cabecalhos(), cache: "no-store" })).json();
+    if (telaCarregada === null) telaCarregada = v.tela;
+    else if (v.tela !== telaCarregada && !ocAberta && !document.querySelector(".menu.aberto")) location.reload();
+  } catch {}
+}
+conferirTela();
+setInterval(conferirTela, 2 * 60000);
 
 // nome da organização no topo; PWA (só quando a página vem do servidor, não dentro do app Android)
 function aplicarPerfil() {
