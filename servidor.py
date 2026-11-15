@@ -68,11 +68,43 @@ def resumo_celular(p):
     except Exception:
         avisos = []
     pl = p.get("plantao") or {}
+    nome = lambda o: coletor.rotulo_usina(o["usina"])[:40]
+
+    def tempo(o):
+        c, pv = o.get("clima_agora") or {}, o.get("clima_previsao") or {}
+        return {"agora": c.get("rotulo") if c.get("nivel") else None,
+                "previsao": (pv.get("rotulo"), pv.get("quando")) if pv.get("nivel") else None,
+                "inmet": [a["descricao"] for a in o.get("aviso_inmet") or []]}
+
+    detalhes = [dict({"usina": nome(o), "codigo": o.get("codigo"), "sev": o["sev"], "status": o.get("status") or "aberto",
+                      "desde": o["inicio_ts"], "ultima": o["ultima_ts"], "texto": relatorio._o_que_houve(o)[:160],
+                      "motivo": relatorio._limpo((o.get("status_motivo") or "").split(": ", 1)[-1], 110) if o.get("status_origem") != "manual" else ""},
+                     **tempo(o)) for o in ativas[:12]]
+    tratativa = [{"usina": nome(o), "sev": o["sev"], "desde": o["inicio_ts"],
+                  "motivo": relatorio._limpo(re.sub(r"^\s*\*[^*]{0,80}\*", "", (o.get("status_motivo") or "").split(": ", 1)[-1]), 110)
+                  if o.get("status_origem") != "manual" else "definido no painel"}
+                 for o in abertas if o.get("status") == "em_tratativa"][:10]
+    campo = [{"tecnico": x["tecnico"][:30], "usina": coletor.rotulo_usina(x["usina"])[:36], "desde": x["entrada_ts"]}
+             for x in p.get("presencas") or [] if not x.get("saida_ts")]
+    manut = [{"usina": coletor.rotulo_usina(a["usina"])[:36], "descricao": (a.get("descricao") or "")[:60], "desde": a["inicio_ts"]}
+             for a in p.get("atividades") or [] if a.get("status") == "andamento"][:8]
+    try:
+        cp = clima.painel()
+        clima_resumo = {"avisos": [{"descricao": a["descricao"], "severidade": a["severidade"], "fim": a["fim"], "cor": a.get("cor"),
+                                    "usinas": len(a["usinas"])} for a in cp["avisos"] if a.get("em_vigor")],
+                        "chuva_agora": sum(1 for u in cp["usinas"] if (u.get("atual") or {}).get("nivel")),
+                        "temporal_6h": sum(1 for u in cp["usinas"] if (u.get("prox6") or {}).get("nivel") == "severo")}
+    except Exception:
+        clima_resumo = {"avisos": [], "chuva_agora": 0, "temporal_6h": 0}
     return {"plantao": bool(pl.get("ativo")), "inicio_ts": pl.get("inicio_ts"), "titulo": pl.get("titulo") or "Plantão",
+            "equipe": pl.get("equipe") or [],
             "criticas": sum(o["sev"] == "critico" for o in ativas), "alertas": sum(o["sev"] != "critico" for o in ativas),
             "tratativa": len(abertas) - len(ativas),
-            "em_campo": len([x for x in p.get("presencas") or [] if not x.get("saida_ts")]),
-            "linhas": linhas, "inmet": avisos, "quando": p.get("quando")}
+            "em_campo": len(campo), "linhas": linhas, "inmet": avisos, "quando": p.get("quando"),
+            "whatsapp": (p.get("whatsapp") or {}).get("conexao") == "open",
+            "ocorrencias": detalhes, "tratativa_lista": tratativa, "campo": campo, "manutencoes": manut, "clima": clima_resumo,
+            "resolvidas_24h": sum(1 for o in p.get("ocorrencias", []) if o.get("normalizado") and not o.get("generico")
+                                  and time.time() - o["normalizado"].get("ts", 0) < 86400)}
 
 
 def ler_plantao():
