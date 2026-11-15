@@ -263,7 +263,80 @@ def classificar_manutencao(bruto):
             resto = ""  # "entrada na usina": sem nome; vale a usina do grupo
         hora = p.group(2).replace("h", ":") if p.group(2) else hora_depois
         return tipo, None, hora, (resto or None)
-    return None
+    # primeira linha ("Saída UFV X" + detalhes embaixo); se não bastar, a mensagem inteira numa linha só
+    # (formulário com 📆 🕰️ 🚘 em várias linhas, "Bom dia" numa linha e a entrada na seguinte)
+    return ler_presenca(linha) or (ler_presenca(" ".join(bruto.split())) if "\n" in bruto.strip() else None)
+
+
+# ---- outros jeitos de avisar entrada/saída ----
+# formulário: "UFV-PASSIRA - PE Empresa-Gerar Técnico- AVELINO SANTOS 📆 13/11/2026 🕰️ 06:56 🚘 TYU9E83 ENTRADA"
+PRES_FORM = re.compile(r"^(?P<lugar>.+?)\s+Empresa-.*?T[ée]cnico-\s*(?P<nome>[^📆]+?)\s*📆.*?🕰\S*\s*(?P<hora>\d{1,2}:\d{2})"
+                       r".*?\b(?P<v>entrada|sa[ií]da)\s*$", re.I)
+# "Elton entrada em Axis 4 as 12:15", "João e Otávio saindo jau 100", "Rafael - Entrada UFV Guararapes - 07:08",
+# "Entrando na UFV CANDIBA", "UFV-ARACI entrada as 14:30", "Tec Wildes saída da UFV AXIS MG V"
+PRES_LIVRE = re.compile(r"^(?P<antes>.{0,65}?)(?:(?<=^)|(?<=[\s\-–,.!:]))(?P<v>entrada|entrando|entrei|entramos|sa[ií]da|saindo|"
+                        r"sa[ií]mos|chegada|cheguei|chegamos)\b(?P<depois>.*)$", re.I)
+PRES_ESTOU = re.compile(r"\b(?:j[aá]\s+)?(?:estou|estamos|t[oô])\s+(?:na|no)\s+(?P<depois>(?:ufvs?|usina)(?:\b|(?=\d)).*)$", re.I)
+PRES_PROIBIDO = re.compile(r"\b(quando|se|foi|previs[aã]o|temperatura|port[aã]o|porta|tens[aã]o|corrente|energia|dados|"
+                           r"est[aá]|est[aã]o|vai|v[aã]o|ir[aá]|pessoal|precisa|antes|depois|ap[oó]s|aguard\w*|hora de|qual|"
+                           r"testou|cabo|inversor|exaustor\w*)\b", re.I)
+SAUDACAO = re.compile(r"^\s*(bom dia|boa tarde|boa noite|ol[aá]|pessoal)\W*|@\S+(?:\s+[A-ZÀ-Ú0-9]\S*){0,3}\s*|\b(t[ée]c(nico)?\.?|eletricista)\s+", re.I)
+
+
+def _hora_e_lugar(depois):
+    depois = re.sub(r"^\s*(?:(?:da|de|do|em|na|no|à|a|ao|as|às|pra|para a|para o)\s+)*", "", depois)
+    h = re.search(r"(?:\b(?:às|as|a partir das)\s*)?\b(\d{1,2})[:h](\d{1,2})(?!\d)(?:\s*h(?:rs?|s)?\b)?", depois)
+    hora = None
+    if h:
+        hora = f"{int(h.group(1)):02d}:{int(h.group(2)):02d}" if int(h.group(1)) < 24 and int(h.group(2)) < 60 else None
+        depois = (depois[:h.start()] + " " + depois[h.end():])
+    lugar = re.split(r"[.,;!?]|\s[-–]\s|\s{2,}|\b(?:para|pra|com|estarei|irei|vou|e equipe|equipe)\b", depois.strip(" -–"))[0]
+    lugar = re.sub(r"^\s*(?:(?:da|de|do|em|na|no|à|a|ao)\s+)*", "", lugar)
+    lugar = re.sub(r"^\s*UFVs?\s*[-–:]?\s*", "", lugar, flags=re.I).strip(" .!,;-–")
+    if lugar and (len(lugar) > 40 or re.search(r"\bbase\b|\b(minha|cidade|casa|hotel|o&m|oem)\b", lugar, re.I)):
+        return hora, False
+    if lugar and not (lugar[0].isupper() or lugar[0].isdigit()) or re.fullmatch(r"\d+", lugar or ""):
+        lugar = ""  # "entrada na usina", "estou na UFV3": vale a usina do grupo
+    return hora, (lugar or None)
+
+
+def ler_presenca(linha):
+    """Entrada/saída nos outros formatos que os técnicos usam. Devolve (tipo, quem, hora, usina citada) ou None.
+    'quem' são os nomes escritos antes ("João e Otávio"), quando houver."""
+    if "?" in linha or len(linha) > 200:
+        return None
+    f = PRES_FORM.search(linha)
+    if f:
+        tipo = "entrada" if sem_acento(f.group("v").lower()).startswith("entrada") else "saida"
+        lugar = re.sub(r"^\s*UFVs?\s*[-–:]?\s*", "", f.group("lugar"), flags=re.I).strip(" -–")
+        return tipo, f.group("nome").strip().title(), f.group("hora"), lugar or None
+    e = PRES_ESTOU.search(linha)
+    if e and len(linha) <= 90 and not PRES_PROIBIDO.search(linha[:e.start()]):
+        hora, lugar = _hora_e_lugar(re.sub(r"^(?:ufvs?|usina)\b\s*", "UFV ", e.group("depois"), flags=re.I))
+        return ("entrada", None, hora, lugar or None) if lugar is not False else None
+    p = PRES_LIVRE.match(linha)
+    if not p:
+        return None
+    antes = p.group("antes")
+    if PRES_PROIBIDO.search(antes) or PRES_PROIBIDO.match(p.group("depois").strip(" -–") or "x"):
+        return None
+    v = sem_acento(p.group("v").lower())
+    tipo = "entrada" if v.startswith(("entr", "cheg")) else "saida"
+    lugar_antes = None
+    a = re.split(r"[.!]\s+", antes.strip(" -–,.:"))[-1]  # "Vistoria concluída! Técnico Rogger ... saída"
+    if re.match(r"^UFVs?\b", a, re.I):
+        lugar_antes, a = re.sub(r"^\s*UFVs?\s*[-–:]?\s*", "", a, flags=re.I).strip(" -–"), ""
+    while True:  # tira "Bom dia", "@COG", "Tec.", "Técnico"
+        b = SAUDACAO.sub("", a, count=1).strip(" -–,.:!")
+        if b == a:
+            break
+        a = b
+    if len(a) > 50 or (a and not a[0].isupper()):
+        return None
+    hora, lugar = _hora_e_lugar(p.group("depois"))
+    if lugar is False:
+        return None
+    return tipo, (a or None), hora, (lugar_antes or lugar or None)
 
 
 def extrair_nome_usina(bruto):
@@ -446,13 +519,13 @@ def operacao(chat, dados, agora=None, janela=None):
             continue
         if not de_uma_usina:
             cod_ctx = CODIGO.search(bruto)
-            pres = classificar_manutencao(bruto)
+            pres = classificar_manutencao(m.get("text") or bruto)
             nome_ctx = extrair_nome_usina(bruto) or (pres[3] if pres and pres[0] in ("entrada", "saida") else None)
             if cod_ctx:
                 contexto = (m["ts"], cod_ctx.group(1), cod_ctx.group(1))
             elif nome_ctx:
                 contexto = (m["ts"], "nome:" + nome_ctx, "UFV " + nome_ctx)
-        man = classificar_manutencao(bruto)
+        man = classificar_manutencao(m.get("text") or bruto)
         if man:
             mtipo, descricao, hora, citada = man
             cod = CODIGO.search(bruto)
@@ -727,8 +800,16 @@ def montar_manutencoes(eventos, usinas, ocorrencias, agora=None):
 
     presencas, por_pessoa = [], {}
     for e in sorted((e for e in eventos if e["tipo"] in ("entrada", "saida")), key=lambda e: e["ts"]):
-        quem = sem_acento(e["quem"])
+        # "João e Otávio entrando" / "João saindo": a pessoa é o primeiro nome escrito; sem nome, quem postou
+        nomes = e.get("descricao")
+        quem = sem_acento(nomes.split()[0]).lower() if nomes else sem_acento(e["quem"])
         aberta = por_pessoa.get(quem)
+        if e["tipo"] == "saida" and not (aberta and not aberta["saida_ts"]):
+            # saída sem o nome de quem entrou ("Saída de GOY 500" depois de "Ederson entrada em GOY 500"):
+            # fecha a presença aberta que essa mesma pessoa postou (na mesma usina, se ela disse qual)
+            minhas = [p for p in presencas if not p["saida_ts"] and p.get("postou") == e["quem"]
+                      and (str(e["chave_usina"]).startswith("sem_usina:") or p["chave_usina"] == e["chave_usina"])]
+            aberta = minhas[-1] if minhas else None
         if e["tipo"] == "entrada":
             if aberta and aberta["chave_usina"] == e["chave_usina"] and not aberta["saida_ts"]:
                 continue  # repetiu a entrada
@@ -736,7 +817,8 @@ def montar_manutencoes(eventos, usinas, ocorrencias, agora=None):
                 aberta["saida_ts"] = e["ts"]  # entrou em outra usina: saiu da anterior
             if str(e["chave_usina"]).startswith("sem_usina:"):
                 continue  # entrada sem dizer onde, num grupo geral
-            p = {"chave": f"pres|{quem}|{e['id']}", "tecnico": e["quem"], "chave_usina": e["chave_usina"], "usina": e["usina"],
+            p = {"chave": f"pres|{quem}|{e['id']}", "tecnico": nomes or e["quem"], "postou": e["quem"],
+                 "chave_usina": e["chave_usina"], "usina": e["usina"],
                  "codigo": e.get("codigo"), "entrada_ts": e["ts"], "saida_ts": None, "grupo": e["grupo"]}
             por_pessoa[quem] = p
             presencas.append(p)
