@@ -314,8 +314,9 @@ def eh_normalizacao(t):
 
 
 FALSO = re.compile(r"\b(fakes?|falsos?|falsas?|indevid\w*|espuri\w*|sem desarme|nao desarmou)\b")
-USINA_TODA = re.compile(r"\b(usina|projeto|disjuntor|52l|religador|protecao|rele|trafo|transformador|cabine|subestacao|"
-                        r"parada total|sem geracao|geracao zerad|emergencial|acionamento)\b")
+# "Usina:" é só o campo do formulário de acionamento; "emergencial"/"acionamento" falam do chamado, não da usina inteira
+USINA_TODA = re.compile(r"\b(usina(?!\s*:)|projeto|disjuntor|52l|religador|protecao|rele|trafo|transformador|cabine|subestacao|"
+                        r"parada total|sem geracao|geracao zerad|todos os inversores)\b")
 
 
 def classificar(t):
@@ -562,8 +563,8 @@ def montar_ocorrencias(eventos, usinas, vinculos=None):
             o["jids"] = sorted(set(o["jids"]) | {e["jid"]})
             o["ids"].append(e["id"])
             o["niveis"].append([e["ts"], e["tipo"]])
-            if e["tipo"] == "critico" and o["sev"] != "critico":
-                o["sev"], o["msg"] = "critico", e["msg"]
+            if e["tipo"] == "critico":
+                o["sev"], o["msg"] = "critico", e["msg"]  # o card mostra o aviso crítico mais recente, não o primeiro
             o["ultimo_msg"] = e["msg"]
             continue
         if o and o["normalizado"] and e["ts"] - o["fim_ts"] <= 10 * 60:

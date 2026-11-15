@@ -61,6 +61,8 @@ for frase, nivel in [
     ("sim sim leitura fica oscilando, alarmes de desarme fakes", "alerta"),
     ("Inversores desarmando por alarme de sobretensão. Abriremos um chamado com a rede da concessionária.", "alerta"),
     ("o inversor 06 segue parado", "alerta"),
+    ("*ACIONAMENTO – CORRETIVA EMERGENCIAL* Usina: UFV ABC100 – X Descrição: Inversor 06 parado com alarme de baixa R.I", "alerta"),
+    ("*ACIONAMENTO – CORRETIVA EMERGENCIAL* Usina: UFV ABC100 – X Descrição: Usina desarmada, disjuntor 52L aberto", "critico"),
     ("Usina desarmou por sobretensão", "critico"),
     ("*🚨 ACIONAMENTO – CORRETIVA EMERGENCIAL* Usina em falha de comunicação total, inversor sem dados", "critico"),
 ]:
