@@ -186,6 +186,7 @@
   @media (max-width: 1000px) { #vista-mapa { grid-template-columns: 1fr; padding: 10px 12px; } #mapa { height: 60vh; } }
 
   .no-app #btn-tela, .no-app .so-pc { display: none; }
+  .sem-usina { margin-top: 10px; } .sem-usina summary { font-size: 11.5px; } .sem-usina .oc { opacity: .75; }
   .mt { display: grid; grid-template-columns: 4px 1fr auto; gap: 0 12px; padding: 10px 10px 10px 0; border-bottom: 1px solid #0f1b38; }
   .mt .barra { border-radius: 3px; background: #3987e5; box-shadow: 0 0 10px #3987e5; }
   .mt .titulo { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
@@ -593,7 +594,7 @@ function verificarNovos(d) {
   const novos = [];
   for (const o of d.ocorrencias || []) {
     const k = "oc:" + o.chave + ":" + o.sev;
-    if (!o.normalizado && !vistos.has(k)) novos.push(["oc", o, k]);
+    if (!o.normalizado && !o.generico && !vistos.has(k)) novos.push(["oc", o, k]);
   }
   for (const o of d.ocorrencias || []) {
     const k = "cf:" + o.chave + ":" + (o.confirmar ? o.confirmar.desde : "");
@@ -626,7 +627,8 @@ const REPETIR = 5;
 let ultimoReforco = 0;
 function reforcar() {
   if (!dados || !dados.pronto || !somLigado) return;
-  const pendentes = (dados.ocorrencias || []).filter(o => !o.normalizado && o.sev === "critico" && !o.ciente);
+  const pendentes = (dados.ocorrencias || []).filter(o => !o.normalizado && o.sev === "critico" && !o.ciente && !o.generico
+    && !(o.durante_manutencao && o.durante_manutencao.ate_agora));
   if (!pendentes.length || Date.now() - ultimoReforco < REPETIR * 60000) return;
   ultimoReforco = Date.now();
   const o = pendentes[0];
@@ -655,7 +657,8 @@ function desenhar() {
   $("avisos").innerHTML = avisos.map(a => `<div class="aviso">${esc(a)}</div>`).join("");
 
   // indicadores
-  const abertas = d.ocorrencias.filter(o => !o.normalizado), normalizadas = d.ocorrencias.filter(o => o.normalizado);
+  const deUsina = d.ocorrencias.filter(o => !o.generico), semUsina = d.ocorrencias.filter(o => o.generico && !o.normalizado);
+  const abertas = deUsina.filter(o => !o.normalizado), normalizadas = deUsina.filter(o => o.normalizado);
   const crit = abertas.filter(o => o.sev === "critico").length;
   $("v-crit").textContent = crit; $("k-crit").classList.toggle("alarme", abertas.some(o => o.sev === "critico" && !o.ciente));
   $("v-alerta").textContent = abertas.length - crit;
@@ -674,7 +677,7 @@ function desenhar() {
   document.title = (crit ? `🚨${crit} ` : "") + (reais.length ? `(${reais.length}) ` : "") + "Centro de Operações";
 
   // ocorrências
-  const listaOc = filtroOc === "abertas" ? abertas : filtroOc === "normalizadas" ? normalizadas : d.ocorrencias;
+  const listaOc = filtroOc === "abertas" ? abertas : filtroOc === "normalizadas" ? normalizadas : deUsina;
   $("q-oc").textContent = abertas.length;
   $("ocorrencias").innerHTML = listaOc.map(o => {
     const classe = o.normalizado ? (o.normalizado.motivo === "inatividade" ? "normalizado inatividade" : "normalizado") : o.sev;
@@ -683,11 +686,13 @@ function desenhar() {
     return `<div class="oc ${classe} ${nova && !o.normalizado ? "nova" : ""}" data-chave="${esc(o.chave)}">
       <div class="barra"></div>
       <div style="min-width:0">
-        <div class="topo"><span class="usina">${esc(o.usina)}</span><span class="sev">${o.normalizado ? motivoBaixa(o) : o.sev === "critico" ? "CRÍTICA" : "ALERTA"}</span>
+        <div class="topo"><span class="usina">${esc(nomeUsina(o))}</span>${o.codigo && !o.usina.startsWith(o.codigo) ? `<span class="tag">${esc(o.codigo)}</span>` : ""}
+          <span class="sev">${o.normalizado ? motivoBaixa(o) : o.sev === "critico" ? "CRÍTICA" : "ALERTA"}</span>
+          ${o.era_critica && !o.normalizado ? `<span class="tag" title="Começou como crítica; os avisos mais recentes são só de alerta">ERA CRÍTICA</span>` : ""}
           ${o.qtd > 1 ? `<span class="tag">${o.qtd} AVISOS</span>` : ""}${o.ciente ? `<span class="tag">CIENTE</span>` : ""}
           ${o.durante_manutencao ? `<span class="tag manut" title="Começou com uma manutenção em andamento na usina">🔧 DURANTE MANUTENÇÃO: ${esc(o.durante_manutencao.descricao).toUpperCase()}</span>` : ""}</div>
         <div class="texto">${esc(o.msg.texto)}</div>
-        <div class="quem">${esc(o.msg.de)} · ${esc(o.grupos.join(" · "))}</div>
+        <div class="quem">${esc(o.msg.de)} · ${hm(o.msg.ts || o.inicio_ts)} · <span title="${esc(o.grupos.join("\n"))}">${esc(o.grupos.length > 1 ? o.grupos[0] + " +" + (o.grupos.length - 1) : o.grupos[0])}</span></div>
         ${o.normalizado ? `<div class="norm">✔ ${hm(o.normalizado.ts)} ${esc(o.normalizado.de)}: ${esc(o.normalizado.texto.slice(0, 140))}</div>` : ""}
         ${o.confirmar ? `<div class="pergunta">⏸ Sem novidades há ${dur(agora() - o.confirmar.desde)}. Continua com o mesmo status?
           <button class="sim" data-oc="acompanhar" title="Segue aberta; pergunta de novo depois de 6 h sem novidade">CONTINUAR ACOMPANHANDO</button>
@@ -698,6 +703,14 @@ function desenhar() {
         ${!o.normalizado ? `<button data-oc="encerrar" title="Fecha a ocorrência (resolvida sem aviso no grupo)">ENCERRAR</button>` : ""}
         ${o.normalizado ? `<button data-oc="reabrir" title="A baixa foi errada: volta a ficar aberta">REABRIR</button>` : ""}</span></div></div>`;
   }).join("") || `<div class="vazio">${filtroOc === "abertas" ? "Nenhuma ocorrência aberta nas últimas 24 h. ✅" : "Nada aqui."}</div>`;
+  // avisos de grupo geral sem usina identificada: à parte, sem alarme
+  if (semUsina.length && filtroOc !== "normalizadas") {
+    $("ocorrencias").insertAdjacentHTML("beforeend", `<details class="sem-usina"><summary>💬 Avisos em grupos gerais sem usina identificada · ${semUsina.length}</summary>
+      ${semUsina.map(o => `<div class="oc alerta" data-chave="${esc(o.chave)}"><div class="barra" style="--cor:#64748b"></div><div style="min-width:0">
+        <div class="topo"><span class="usina" style="color:var(--fraco)">${esc(o.grupos[0])}</span><span class="tag">USINA NÃO IDENTIFICADA</span></div>
+        <div class="texto">${esc(o.msg.texto)}</div><div class="quem">${esc(o.msg.de)} · ${dhm(o.ultima_ts)}</div></div>
+        <div class="lado"><button data-oc="encerrar">DISPENSAR</button></div></div>`).join("")}</details>`);
+  }
 
   // quadro de usinas
   $("q-usi").textContent = d.usinas.length;
@@ -761,6 +774,13 @@ function cartaoChamadoDiario(c, comBotoes = true) {
     ${c.descricao ? `<div class="x" style="white-space:pre-wrap">${esc(c.descricao).slice(0, 600)}</div>` : ""}
     <div class="x">${[c.acionado_por && "acionado por " + c.acionado_por, c.tecnico, c.os && "OS " + c.os].filter(Boolean).map(esc).join(" · ")}</div>
     ${comBotoes ? botoesDiario("chamado", c) : ""}</div>`;
+}
+// nome da usina para o card: "JIB100" sozinho ganha o nome aprendido do COG; nome de grupo vira só a usina
+function nomeUsina(o) {
+  const nomes = (kmz && kmz.codigos) || {};
+  let n = o.usina || "";
+  if (/^[A-Z]{2,4}\d{3}$/.test(n) && nomes[n]) n = `${n} – ${nomes[n]}`;
+  return n.replace(/\s+(Gerar|GERAR|Gera)\b.*$/, "").replace(/^UFVs?\s+/, "UFV ");
 }
 function desenharLista(chamados7) {
   const d = dados;
@@ -1048,7 +1068,7 @@ function desenharMapa(enquadrar) {
   else if (aberta && marcadores[aberta]) marcadores[aberta].openPopup();
 
   // lista ao lado: ocorrências abertas; as que têm lugar no mapa levam até ele
-  const abertas = (dados.ocorrencias || []).filter(o => !o.normalizado);
+  const abertas = (dados.ocorrencias || []).filter(o => !o.normalizado && !o.generico);
   $("q-mapa").textContent = abertas.length;
   $("mapa-lista").innerHTML = abertas.map(o => {
     const alvo = o.codigo && usinasKmz.find(p => chaveCodigo(p.nome) === chaveCodigo(o.codigo.split("/")[0]));
@@ -1122,7 +1142,7 @@ function desenharDetalhe(o, mensagens) {
     if (ponto) proximos = kmz.pontos.filter(p => p.categoria === "tecnico").map(t => ({ t, km: distanciaKm(ponto, t) })).sort((a, b) => a.km - b.km).slice(0, 3);
   }
   $("gaveta-topo").innerHTML = `
-    <h3>${esc(o.usina)}</h3>
+    <h3>${esc(nomeUsina(o))}</h3>
     <div class="meta-g"><span class="sev" style="--cor:${cor}">${nivel}</span>${o.codigo ? `<span class="tag">${esc(o.codigo)}</span>` : ""}
       <span class="mono">${dhm(o.inicio_ts)}${norm ? " → " + dhm(norm.ts) : ""}</span><span>· ${duracao}</span>${o.qtd > 1 ? `<span>· ${o.qtd} avisos</span>` : ""}${o.ciente ? `<span class="tag">CIENTE</span>` : ""}</div>
     <div class="meta-g" style="margin-top:4px">${esc((o.grupos || []).join(" · "))}</div>

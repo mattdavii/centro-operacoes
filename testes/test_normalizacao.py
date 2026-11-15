@@ -21,6 +21,8 @@ DA_BAIXA = [
     "PD encerra aqui a OS",
     "Pode encerrar a OS 5688, usina comunicando",
     "OS 5690 finalizada",
+    "Normalizado",
+    "@COG foi identificado o dinjuntor do padrão de entrada desarmado ( em trip) após as devidas verificações nada de anormal foi constatado disjuntor foi fechado",
     "* *UFV QSS100 – Quissamã 100* *🔌🟥 Ocorrência: Disjuntor 52L aberto* > Proteções atuadas: > • 27 (Subtensão) > Horário do desarme: 18h26min *🔌🟩 Normalização: Disjuntor 52L Fechado* > Horário de fechamento: 19h02min",
 ]
 NAO_DA_BAIXA = [
@@ -48,6 +50,24 @@ NAO_DA_BAIXA = [
 NAO_E_OCORRENCIA = [
     "A usina será desligada amanhã às 8h para a preventiva",
 ]
+
+# gravidade: crítica só quando a usina toda está fora; falha só de inversor, de relé ou alarme falso é alerta
+for frase, nivel in [
+    ("sim sim leitura fica oscilando, alarmes de desarme fakes", "alerta"),
+    ("Inversores desarmando por alarme de sobretensão. Abriremos um chamado com a rede da concessionária.", "alerta"),
+    ("o inversor 06 segue parado", "alerta"),
+    ("Usina desarmou por sobretensão", "critico"),
+    ("*🚨 ACIONAMENTO – CORRETIVA EMERGENCIAL* Usina em falha de comunicação total, inversor sem dados", "critico"),
+]:
+    if coletor.classificar(coletor.sem_acento(frase)) != nivel:
+        erros += 1
+        print("✗ gravidade:             ", frase, "→", coletor.classificar(coletor.sem_acento(frase)), "(esperado", nivel + ")")
+# "Usina Itaperuna" (sem "UFV") também identifica a usina
+for frase, nome in [("Identificamos uma ocorrência na Usina Itaperuna. 🆔 OS: 5697", "Itaperuna"),
+                    ("Usina desarmada por sobretensão", None)]:
+    if coletor.extrair_nome_usina(frase) != nome:
+        erros += 1
+        print("✗ nome da usina:         ", frase, "→", coletor.extrair_nome_usina(frase))
 
 # são ocorrência (usina ainda parada esperando atendimento), mesmo sem palavra de falha
 E_OCORRENCIA = [
@@ -111,6 +131,6 @@ for frase, esperado in [
 if coletor.classificar(coletor.sem_acento("*UFV GOY100 – GOY100* *⚙️🟩 Atividade concluída: Roçada*")) == "normal" and \
    coletor.classificar_manutencao("*UFV GOY100 – GOY100* *⚙️🟩 Atividade concluída: Roçada*") is None:
     erros += 1
-total = 10 + 5 + len(DA_BAIXA) + len(NAO_DA_BAIXA) + len(NAO_E_OCORRENCIA) + len(E_OCORRENCIA) + 2
+total = 7 + 10 + 5 + len(DA_BAIXA) + len(NAO_DA_BAIXA) + len(NAO_E_OCORRENCIA) + len(E_OCORRENCIA) + 2
 print(f"{total - erros}/{total} casos certos")
 sys.exit(1 if erros else 0)

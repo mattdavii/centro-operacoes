@@ -642,7 +642,7 @@ class Pagina(http.server.BaseHTTPRequestHandler):
                                  "sev": "alerta" if (o.get("durante_manutencao") or {}).get("ate_agora") else o["sev"],
                                  "texto": (f"🔧 durante manutenção ({o['durante_manutencao']['descricao']}): "
                                            if (o.get("durante_manutencao") or {}).get("ate_agora") else "") + o["msg"]["texto"][:200]}
-                                for o in p["ocorrencias"] if not o["normalizado"]]
+                                for o in p["ocorrencias"] if not o["normalizado"] and not o.get("generico")]
                                + teste_alarme(),
                 "confirmar": [{"chave": o["chave"], "usina": o["usina"], "desde": o["confirmar"]["desde"]}
                               for o in p["ocorrencias"] if o.get("confirmar") and not o["normalizado"]],
@@ -751,6 +751,16 @@ class Pagina(http.server.BaseHTTPRequestHandler):
         self.responder(404, {"erro": "não encontrado"})
 
 
+class Servidor(http.server.ThreadingHTTPServer):
+    daemon_threads = True
+
+    def handle_error(self, request, client_address):
+        # navegador que fechou a conexão no meio da resposta (troca de página, celular sem sinal): não é erro do painel
+        if isinstance(sys.exc_info()[1], (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, TimeoutError)):
+            return
+        super().handle_error(request, client_address)
+
+
 def registrar(painel):
     """Histórico de ocorrências e, quando o plantão termina, a passagem de plantão salva em Documentos."""
     if not painel.get("pronto"):
@@ -767,7 +777,7 @@ if __name__ == "__main__":
     # 0.0.0.0 para o celular chegar pelo Tailscale; quem não é deste PC nem do Tailscale com a senha é recusado
     for tentativa in range(20):
         try:
-            servidor = http.server.ThreadingHTTPServer(("0.0.0.0", PORTA), Pagina)
+            servidor = Servidor(("0.0.0.0", PORTA), Pagina)
             break
         except OSError:
             time.sleep(1)

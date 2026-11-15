@@ -141,6 +141,7 @@ PENDENTE = re.compile(r"\b(para|pra|p/)\s+(religar|rearmar|restabelecer|energiza
                       r"\b(continua|segue|permanece)\s+(desligad|parad|desarmad|fora)")
 USINA = re.compile(r"\bUFVs?\b|\busina", re.I)
 JANELA = 24 * 3600     # ocorrências e atividade das últimas 24 h
+CONTEXTO_SEG = 20 * 60  # num grupo geral, mensagem sem usina vale a usina citada até 20 min antes na mesma conversa
 MONTAGEM = JANELA  # ocorrências montadas com as últimas 24 h (3 dias deixava críticas velhas abertas para sempre);
                    # a identidade entre remontagens fica com as marcações, que guardam as mensagens (servidor.py)
 SEM_REGISTRO = 24 * 3600  # crítica sem aviso novo por esse tempo sai como "sem registro de normalização"
@@ -182,6 +183,7 @@ FIM_OS = re.compile(r"\b(pode|pd|podem|pode-se)\s+(encerrar|encerra|fechar|final
                     r"\batendimento\s+(finalizado|encerrado|concluido)\b")
 TECNICO = re.compile(r"T[ée]cnico acionado:\s*([A-ZÀ-Ú][\wÀ-ú]+(?:\s+[A-ZÀ-Ú][\wÀ-ú]+)?)")
 NORMAL_FATO = re.compile(
+    r"\b(disjuntor|chave|religador|protecao)\b[^.?!]{0,40}\b(foi |ja foi |ja esta )?(fechad|rearmad|religad)\w*|\bfoi fechad[oa]\b|"
     r"\b(normalizad[oa]s?|restabelecid[oa]s?|reestabelecid[oa]s?|religad[oa]s?|rearmad[oa]s?)\b|"
     r"\b(voltou|voltaram|retornou|retornaram)\b(?! a (falhar|cair|desarmar|alarmar))|"
     r"\b(ja )?(esta|estao|segue|seguem) (gerando|operando|comunicando|normal)\b|"
@@ -257,7 +259,8 @@ def classificar_manutencao(bruto):
 def extrair_nome_usina(bruto):
     """'UFV Monsenhor Tabosa religada.' -> 'Monsenhor Tabosa'. Só palavras com inicial maiúscula (ou números) logo
     depois de 'UFV', parando em palavras de status. None se a mensagem não nomeia uma usina."""
-    m = re.search(r"\bUFVs?\s+((?:[A-ZÀ-Ú0-9][\wÀ-ú'´-]*\.?\s*){1,4})", bruto)
+    m = re.search(r"\bUFVs?\s+((?:[A-ZÀ-Ú0-9][\wÀ-ú'´-]*\.?\s*){1,4})", bruto) or \
+        re.search(r"\b[Uu]sinas?\s+(?:de\s+|da\s+|do\s+)?((?:[A-ZÀ-Ú][\wÀ-ú'´-]*\.?\s*)(?:[A-ZÀ-Ú0-9][\wÀ-ú'´-]*\.?\s*){0,3})", bruto)
     if not m:
         return None
     nome = []
@@ -295,15 +298,22 @@ def eh_normalizacao(t):
         antes, depois = f[:m.start()], f[m.end():]
         if f.rstrip().endswith("?") or NEGACAO.search(antes) or INTENCAO.search(antes) or HESITACAO.search(antes):
             continue
-        # mensagem mista: um problema relatado no resto da mensagem desfaz a normalização
-        resto = t.replace(f, " ") + " " + antes
-        if _problema_ativo(resto):
+        # mensagem mista: um problema relatado DEPOIS da solução desfaz a normalização; o que vem antes é a causa
+        # ("disjuntor estava desarmado ... foi fechado")
+        pos = t.find(f)
+        depois_tudo = depois + " " + (t[pos + len(f):] if pos >= 0 else "")
+        if _problema_ativo(depois_tudo):
             continue
         c = CONTRASTE.search(depois)
         if c and (ALERTA.search(depois[c.end():]) or CRITICO.search(depois[c.end():]) or re.search(r"\b(nao|sem)\b", depois[c.end():])):
             continue
         return True
     return False
+
+
+FALSO = re.compile(r"\b(fakes?|falsos?|falsas?|indevid\w*|espuri\w*|sem desarme|nao desarmou)\b")
+USINA_TODA = re.compile(r"\b(usina|projeto|disjuntor|52l|religador|protecao|rele|trafo|transformador|cabine|subestacao|"
+                        r"parada total|sem geracao|geracao zerad|emergencial|acionamento)\b")
 
 
 def classificar(t):
@@ -317,8 +327,13 @@ def classificar(t):
     if "🟥" not in t and eh_normalizacao(t):
         return "normal"
     if PENDENTE.search(t):
-        return "critico"
+        # "o inversor 06 segue parado": é um inversor, a usina segue gerando → alerta
+        return "alerta" if re.search(r"\binversor", t) and not USINA_TODA.search(t) else "critico"
     if CRITICO.search(t):
+        if FALSO.search(t):
+            return "alerta"  # "alarmes de desarme fakes": a usina segue gerando
+        if re.search(r"\binversor", t) and not USINA_TODA.search(t):
+            return "alerta"  # inversor(es) desarmando: a usina segue gerando com os outros
         return "alerta" if SO_COMUNICACAO.search(t) and not GRAVE.search(t) else "critico"
     if ALERTA.search(t) or "🟥" in t:
         return "alerta"
@@ -360,11 +375,20 @@ def operacao(chat, dados, agora=None, janela=None):
         return {"horas": horas, "eventos": [], "usina": None, "feed": []}
     de_uma_usina = bool(USINA.search(nome))
     eventos = []
+    contexto = None  # (ts, chave, rótulo) da última usina citada nesta conversa de grupo geral
     for m in base:
         bruto = texto(m)
         t = sem_acento(bruto)
         if not t or t.startswith("["):
             continue
+        if not de_uma_usina:
+            cod_ctx = CODIGO.search(bruto)
+            pres = classificar_manutencao(bruto)
+            nome_ctx = extrair_nome_usina(bruto) or (pres[3] if pres and pres[0] in ("entrada", "saida") else None)
+            if cod_ctx:
+                contexto = (m["ts"], cod_ctx.group(1), cod_ctx.group(1))
+            elif nome_ctx:
+                contexto = (m["ts"], "nome:" + nome_ctx, "UFV " + nome_ctx)
         man = classificar_manutencao(bruto)
         if man:
             mtipo, descricao, hora, citada = man
@@ -410,6 +434,9 @@ def operacao(chat, dados, agora=None, janela=None):
             citada = extrair_nome_usina(bruto)
             if citada:
                 usina, chave = "UFV " + citada, "nome:" + citada
+            elif contexto and m["ts"] - contexto[0] <= CONTEXTO_SEG:
+                # "Normalizado" ou "disjuntor foi fechado" sem dizer a usina: vale a usina citada há pouco nesta conversa
+                usina, chave = contexto[2], contexto[1]
             elif tipo == "normal":
                 # "religada!" num grupo geral sem dizer qual usina: só vale se quem fala é o técnico acionado
                 # de uma ocorrência (resolvido depois, em montar_ocorrencias); senão não fecha nada
@@ -532,18 +559,27 @@ def montar_ocorrencias(eventos, usinas, vinculos=None):
             o["grupos"] = sorted(set(o["grupos"]) | {e["grupo"]})
             o["jids"] = sorted(set(o["jids"]) | {e["jid"]})
             o["ids"].append(e["id"])
+            o["niveis"].append([e["ts"], e["tipo"]])
             if e["tipo"] == "critico" and o["sev"] != "critico":
                 o["sev"], o["msg"] = "critico", e["msg"]
+            o["ultimo_msg"] = e["msg"]
             continue
         if o and o["normalizado"] and e["ts"] - o["fim_ts"] <= 10 * 60:
             continue  # o mesmo aviso repetido em outro grupo logo depois da normalização
         o = {"chave": f"{k}|{e['id']}", "usina": e["usina"], "chave_usina": k, "jid": e["jid"], "grupos": [e["grupo"]],
              "sev": e["tipo"], "inicio_ts": e["ts"], "ultima_ts": e["ts"], "qtd": 1, "msg": e["msg"],
              "jids": [e["jid"]], "ids": [e["id"]], "generico": e.get("generico", False), "tecnico": e.get("tecnico"),
+             "niveis": [[e["ts"], e["tipo"]]], "ultimo_msg": e["msg"],
              "normalizado": None}
         abertas[k] = o
         ocorrencias.append(o)
     agora = time.time()
+    for o in ocorrencias:
+        # a gravidade mostra o estado ATUAL: crítica antiga (mais de 6 h) seguida só de alertas vira alerta
+        crits = [ts for ts, n in o.get("niveis", []) if n == "critico"]
+        if not o["normalizado"] and o["sev"] == "critico" and crits and agora - max(crits) >= INATIVIDADE and \
+           any(ts > max(crits) and n == "alerta" for ts, n in o.get("niveis", [])):
+            o["sev"], o["era_critica"], o["msg"] = "alerta", True, o.get("ultimo_msg") or o["msg"]
     for o in ocorrencias:
         if o["normalizado"] or agora - o["ultima_ts"] < INATIVIDADE:
             continue
