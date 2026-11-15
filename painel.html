@@ -156,7 +156,8 @@
   .plantao a { color: var(--rotulo); font-size: 10px; letter-spacing: .5px; }
   .plantao .relatorio { color: #ffd5da; border-color: #7f1d2a; background: transparent; }
   .vistas { display: inline-flex; border: 1px solid var(--linha-forte); border-radius: 7px; overflow: hidden; }
-  .vistas button { border: 0; border-radius: 0; background: transparent; color: var(--fraco); font-weight: 700; letter-spacing: 1px; }
+  .vistas button { border: 0; border-radius: 0; background: transparent; color: var(--fraco); font-weight: 700; letter-spacing: .4px; padding: 4px 7px; }
+  .estado .chips { flex-wrap: wrap; justify-content: flex-end; }
   .vistas button.sel { background: #12224a; color: var(--titulo); }
   /* mapa */
   #vista-mapa { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 12px; padding: 12px 18px 18px; }
@@ -185,6 +186,14 @@
   @media (max-width: 1000px) { #vista-mapa { grid-template-columns: 1fr; padding: 10px 12px; } #mapa { height: 60vh; } }
 
   .no-app #btn-tela, .no-app .so-pc { display: none; }
+  .mt { display: grid; grid-template-columns: 4px 1fr auto; gap: 0 12px; padding: 10px 10px 10px 0; border-bottom: 1px solid #0f1b38; }
+  .mt .barra { border-radius: 3px; background: #3987e5; box-shadow: 0 0 10px #3987e5; }
+  .mt .titulo { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+  .mt .titulo b { color: var(--titulo); font-size: 13px; }
+  .mt .desc { font-size: 13px; color: #cfe3ff; margin-top: 2px; }
+  .mt .q { font-size: 11px; color: var(--fraco); margin-top: 3px; }
+  .mt .lado { text-align: right; display: flex; flex-direction: column; gap: 5px; align-items: flex-end; }
+  .mt .lado .t { font-family: var(--mono); font-size: 14px; font-weight: 600; color: #9cc8ff; }
   /* pergunta: ocorrência sem novidade continua? */
   .pergunta { margin-top: 6px; padding: 7px 9px; border-radius: 7px; background: #1d1606; border: 1px solid #5c4310; font-size: 12px; color: #fde68a;
               display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }
@@ -322,7 +331,7 @@
       <button id="btn-teste" title="Dispara um alarme de teste no celular (em até 1 min) e aqui">🔔 Testar alarme</button>
       <button id="btn-celular" class="so-pc" title="Mostra o QR para conectar o app Android a este PC">📱 Conectar celular</button>
       <button id="btn-tela" title="Tela cheia (F)">⛶</button>
-      <span class="vistas"><button class="sel" data-vista="painel">PAINEL</button><button data-vista="mapa">MAPA</button><button data-vista="indicadores">INDICADORES</button></span>
+      <span class="vistas"><button class="sel" data-vista="painel">PAINEL</button><button data-vista="mapa">MAPA</button><button data-vista="manutencoes">MANUTENÇÕES</button><button data-vista="indicadores">INDICADORES</button></span>
     </div>
   </div>
 </header>
@@ -363,6 +372,19 @@
   <div id="mapa"></div>
   <section class="painel"><h2>NO MAPA · OCORRÊNCIAS ABERTAS <span class="qtd" id="q-mapa">0</span></h2>
     <div class="corpo alto mapa-lista" id="mapa-lista"></div></section>
+</section>
+<section id="vista-manutencoes" hidden>
+  <div class="ind-kpis" style="grid-template-columns:repeat(4,minmax(0,1fr))">
+    <div class="kpi" style="--cor:#3987e5"><div class="r">EM MANUTENÇÃO AGORA</div><div class="v" id="mt-and">–</div><div class="s" id="mt-and-s">usinas</div></div>
+    <div class="kpi" style="--cor:var(--amarelo)"><div class="r">PRECISAM CONFIRMAR</div><div class="v" id="mt-conf">–</div><div class="s">12 h ou mais sem "concluída"</div></div>
+    <div class="kpi" style="--cor:var(--roxo)"><div class="r">TÉCNICOS EM CAMPO</div><div class="v" id="mt-campo">–</div><div class="s">entrada sem saída</div></div>
+    <div class="kpi" style="--cor:var(--verde)"><div class="r">CONCLUÍDAS · 7 DIAS</div><div class="v" id="mt-ok">–</div><div class="s" id="mt-ok-s">–</div></div>
+  </div>
+  <div class="ind-grade">
+    <section class="painel largo"><h2>🔧 USINAS EM MANUTENÇÃO <span class="qtd" id="q-mt-and">0</span></h2><div class="corpo" id="mt-lista"></div></section>
+    <section class="painel"><h2>👷 TÉCNICOS EM CAMPO <span class="qtd" id="q-mt-campo">0</span></h2><div class="corpo medio" id="mt-tecnicos"></div></section>
+    <section class="painel"><h2>✔ CONCLUÍDAS E CANCELADAS · 7 DIAS <span class="qtd" id="q-mt-ok">0</span></h2><div class="corpo medio" id="mt-recentes"></div></section>
+  </div>
 </section>
 <section id="vista-indicadores" hidden>
   <div class="filtros">
@@ -541,10 +563,19 @@ function bip(critico) {
     });
   } catch {}
 }
+// notificação do sistema que some sozinha (no Linux/KDE, "exige interação" deixava o balão preso na tela);
+// ela continua no histórico de notificações do sistema, e clicar nela traz o painel para a frente
+function mostrarNotificacao(titulo, opcoes) {
+  try {
+    const n = new Notification(titulo, Object.assign({ requireInteraction: false, icon: "icone-192.png" }, opcoes));
+    n.onclick = () => { window.focus(); n.close(); };
+    setTimeout(() => n.close(), 10000);
+  } catch {}
+}
 function notificar(titulo, corpo, critico) {
   bip(critico);
   if (somLigado && "Notification" in window && Notification.permission === "granted") {
-    try { new Notification((emSilencio() ? "🔕 " : "") + titulo, { body: corpo, tag: titulo + corpo, requireInteraction: critico, silent: emSilencio() }); } catch {}
+    mostrarNotificacao((emSilencio() ? "🔕 " : "") + titulo, { body: corpo, tag: titulo + corpo, silent: emSilencio() });
   }
 }
 $("btn-som").addEventListener("click", async () => {
@@ -580,7 +611,7 @@ function verificarNovos(d) {
     else if (novos.some(([t, o]) => t === "oc")) bip(false);
     const cf = novos.filter(([t]) => t === "cf");
     if (cf.length && somLigado && "Notification" in window && Notification.permission === "granted") {
-      try { new Notification(`⏸ ${cf[0][1].usina}: sem novidades`, { body: "Continua com o mesmo status? Abra o painel para confirmar.", silent: true }); } catch {}
+      mostrarNotificacao(`⏸ ${cf[0][1].usina}: sem novidades`, { body: "Continua com o mesmo status? Abra o painel para confirmar.", silent: true });
     }
   }
   novos.forEach(([, , k]) => vistos.add(k));
@@ -696,6 +727,7 @@ function desenhar() {
 
   desenharLista(chamados7);
   desenharCampo();
+  desenharManutencoes();
   desenharLinhaDoTempo();
   aplicarPerfil();
 
@@ -925,6 +957,7 @@ function mudarVista(v) {
   document.querySelectorAll("[data-vista]").forEach(b => b.classList.toggle("sel", b.dataset.vista === v));
   $("vista-mapa").hidden = v !== "mapa";
   $("vista-indicadores").hidden = v !== "indicadores";
+  $("vista-manutencoes").hidden = v !== "manutencoes";
   $("vista-painel").hidden = $("vista-aovivo").hidden = v !== "painel";
   if (v === "mapa") abrirMapa();
   if (v === "indicadores") carregarIndicadores();
@@ -1224,6 +1257,67 @@ function desenharCampo() {
       <span class="t">${hm(a.inicio_ts)}${fim}</span></div>`; }).join("")
     || `<div class="vazio">Nenhuma manutenção registrada pelo COG nas últimas 24 h.</div>`;
 }
+
+/* ---------- aba MANUTENÇÕES ---------- */
+function desenharManutencoes() {
+  const d = dados, agoraS = agora();
+  const andamento = (d.atividades || []).filter(a => a.status === "andamento");
+  const campo = (d.presencas || []).filter(p => !p.saida_ts);
+  const rec = d.manut_recentes || [];
+  const ok = rec.filter(a => a.status === "concluida").length;
+  $("mt-and").textContent = andamento.length; $("mt-and-s").textContent = andamento.length === 1 ? "usina" : "usinas";
+  $("mt-conf").textContent = andamento.filter(a => a.confirmar).length;
+  $("mt-campo").textContent = campo.length;
+  $("mt-ok").textContent = ok; $("mt-ok-s").textContent = `${rec.length - ok} canceladas ou sem término`;
+  $("q-mt-and").textContent = andamento.length; $("q-mt-campo").textContent = campo.length; $("q-mt-ok").textContent = rec.length;
+  $("mt-lista").innerHTML = andamento.map(a => {
+    const tecs = campo.filter(p => p.chave_usina === a.chave_usina).map(p => p.tecnico);
+    const ocs = (d.ocorrencias || []).filter(o => o.durante_manutencao && o.chave_usina === a.chave_usina && !o.normalizado);
+    return `<div class="mt" data-chave-mt="${esc(a.chave)}">
+      <div class="barra"></div>
+      <div style="min-width:0">
+        <div class="titulo"><b>${esc(a.usina)}</b><span class="st manut-andamento">EM ANDAMENTO</span>${a.fora_da_janela ? `<span class="tag">HÁ MAIS DE 24 H</span>` : ""}</div>
+        <div class="desc">🔧 ${esc(a.descricao)}</div>
+        <div class="q">desde ${dhm(a.inicio_ts)} · ${esc((a.grupos || []).join(" · "))}</div>
+        ${tecs.length ? `<div class="q">👷 em campo: ${esc(tecs.join(", "))}</div>` : ""}
+        ${ocs.length ? `<div class="q" style="color:var(--amarelo)">${ocs.length} ocorrência(s) aberta(s) durante esta manutenção</div>` : ""}
+        ${a.msg ? `<div class="q" style="color:#b9c5de">${esc(a.msg.texto.slice(0, 220))}</div>` : ""}
+        ${a.confirmar ? `<div class="pergunta">⏸ ${dur(agoraS - a.inicio_ts)} sem aviso de conclusão. Ainda em manutenção?
+          <button class="sim" data-mt="continua_manutencao">AINDA EM ANDAMENTO</button><button class="nao" data-mt="fim_manutencao">JÁ TERMINOU</button></div>` : ""}
+      </div>
+      <div class="lado"><span class="t">${dur(agoraS - a.inicio_ts)}</span>
+        <button data-mt="fim_manutencao" title="O grupo não avisou o fim: encerrar aqui">ENCERRAR MANUTENÇÃO</button>
+        ${a.codigo ? `<button data-mt-mapa="${esc(a.codigo)}">📍 MAPA</button>` : ""}</div></div>`;
+  }).join("") || `<div class="vazio">Nenhuma usina em manutenção agora. 👌</div>`;
+  $("mt-tecnicos").innerHTML = campo.map(p => `<div class="campo" data-chave-mt="${esc(p.chave)}">
+      <span><b>${esc(p.tecnico)}</b> <span class="q">em ${esc(p.usina)}</span><br><span class="q">entrou ${dhm(p.entrada_ts)}</span></span>
+      <span style="display:flex;flex-direction:column;gap:4px;align-items:flex-end"><span class="t">há ${dur(agoraS - p.entrada_ts)}</span>
+        <button data-mt="saida_tecnico" title="O técnico saiu e não avisou no grupo">MARCAR SAÍDA</button></span></div>`).join("")
+    || `<div class="vazio">Ninguém registrou entrada em usina agora.</div>`;
+  const nomes = { concluida: ["CONCLUÍDA", "manut-ok"], cancelada: ["CANCELADA", "manut-cancel"], sem_termino: ["SEM TÉRMINO", "manut-cancel"] };
+  $("mt-recentes").innerHTML = rec.map(a => { const [r, c] = nomes[a.status] || ["", ""];
+    return `<div class="campo" data-chave-mt="${esc(a.chave)}"><span><b>${esc(a.usina)}</b> <span class="st ${c}">${a.manual ? "ENCERRADA NO PAINEL" : r}</span><br>
+      <span class="q">🔧 ${esc(a.descricao)}</span></span>
+      <span style="display:flex;flex-direction:column;gap:4px;align-items:flex-end"><span class="t">${dhm(a.inicio_ts)}${a.fim_ts ? " → " + hm(a.fim_ts) : ""}</span>
+        ${a.manual ? `<button data-mt="reabrir_manutencao" title="Encerrou por engano: volta para em andamento">REABRIR</button>` : ""}</span></div>`; }).join("")
+    || `<div class="vazio">Nenhuma nos últimos 7 dias.</div>`;
+}
+document.addEventListener("click", async ev => {
+  const mapaBtn = ev.target.closest("[data-mt-mapa]");
+  if (mapaBtn) {
+    const cod = mapaBtn.dataset.mtMapa; mudarVista("mapa");
+    setTimeout(() => { const p = kmz && kmz.pontos.find(x => x.categoria === "usina" && chaveCodigo(x.nome) === chaveCodigo(cod.split("/")[0])); if (p) irPara(p.nome); }, kmz ? 300 : 1500);
+    return;
+  }
+  const b = ev.target.closest("[data-mt]");
+  if (!b) return;
+  const chave = b.closest("[data-chave-mt]").dataset.chaveMt, tipo = b.dataset.mt;
+  let nota = "";
+  if (tipo === "fim_manutencao") { nota = prompt("Encerrar a manutenção (o grupo não avisou o fim). Observação (opcional):", ""); if (nota === null) return; }
+  b.disabled = true;
+  const r = await post("/api/acao", { chave, tipo, nota });
+  if (r && r.pronto !== undefined) { dados = r; desenhar(); }
+});
 
 /* ---------- indicadores ---------- */
 let indDias = 7, indCliente = "";

@@ -172,6 +172,9 @@ def main():
         ["<b>Em campo · Manutenções</b>", "Quem está em qual usina agora (pelas mensagens \"Entrada em UFV ...\" / \"Saída\") e as "
          "atividades do COG do dia (em andamento, concluída, cancelada). Aparecem também no mapa, na linha do tempo (barras azuis), "
          "no relatório do plantão e nos indicadores."],
+        ["<b>Aba MANUTENÇÕES</b>", "Usinas em manutenção agora, técnicos em campo e as concluídas da semana. Se o grupo não "
+         "avisar o fim: ENCERRAR MANUTENÇÃO; técnico que não avisou a saída: MARCAR SAÍDA. Depois de 12 h sem \"concluída\", "
+         "pergunta \"Ainda em manutenção?\" (nada termina sozinho por tempo)."],
         ["<b>Durante manutenção</b>", "Ocorrência que começa com uma atividade em andamento na mesma usina ganha a etiqueta e não "
          "toca alarme no celular. Se a atividade acabar e a usina continuar com problema, o alarme volta."],
         ["<b>Aguardando você</b>", "Privados em que a última mensagem não é sua e grupos em que te marcaram ou citaram seu nome. "

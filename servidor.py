@@ -114,6 +114,7 @@ def montar():
             resolvidos.append({"chave": chave, "nome": a.get("nome", chave), "tipo": a.get("tipo_chat", ""),
                                "acao": a, "previa": []})
     ocorrencias, usinas = ocorrencias_com_acoes(d, acoes)
+    atividades, presencas, manut_recentes = manutencoes_com_acoes(d, acoes, ocorrencias, usinas)
     abertos = lambda linhas, t: [l for l in linhas if coletor.aberto(l.get("status"), t)]
     # fechados mais recentemente atualizados primeiro (um chamado antigo resolvido hoje aparece em "Resolvidos hoje")
     fechados = lambda linhas: sorted([l for l in linhas if not coletor.aberto(l.get("status"), "chamado")
@@ -127,9 +128,55 @@ def montar():
         "chamados_fechados": fechados(d["chamados"])[:40], "tarefas_fechadas": fechados(d["tarefas"])[:20],
         "ocorrencias": ocorrencias, "usinas": usinas, "boletins": d["boletins"], "feed": d["feed"], "atividade": d["atividade"],
         "plantao": ler_plantao(), "silencio": ler_silencio(),
-        "atividades": d.get("atividades") or [], "presencas": d.get("presencas") or [],
+        "atividades": atividades, "presencas": presencas, "manut_recentes": manut_recentes,
         "perfil": perfil(),
     }
+
+
+def manutencoes_com_acoes(d, acoes, ocorrencias, usinas):
+    """Manutenções e técnicos em campo com as marcações do painel:
+    - manutenção em andamento continua no painel mesmo depois de 24 h, até o COG avisar o fim ou você ENCERRAR;
+    - depois de 12 h sem "concluída", pergunta "Ainda em manutenção?" (AINDA EM ANDAMENTO adia por mais 12 h);
+    - técnico que não avisou a saída: MARCAR SAÍDA.
+    Recalcula o "durante manutenção" das ocorrências e os ícones do quadro de usinas."""
+    agora = time.time()
+    vivas = [dict(a) for a in (d.get("atividades") or [])]
+    chaves = {a["chave"] for a in vivas}
+    em_andamento_vivo = {(a["chave_usina"], coletor.sem_acento(a["descricao"].lower())) for a in vivas if a["status"] == "andamento"}
+    for k, a in relatorio._ler(relatorio.MANUT, {}).items():
+        if k not in chaves and a.get("status") == "andamento" and \
+           (a["chave_usina"], coletor.sem_acento(a["descricao"].lower())) not in em_andamento_vivo:
+            vivas.append(dict(a, fora_da_janela=True))
+    for a in vivas:
+        fim = acoes.get("fimatv:" + a["chave"])
+        if fim and a["status"] == "andamento":
+            a.update(status="concluida", fim_ts=fim["ts"], manual=True,
+                     fim_msg={"ts": fim["ts"], "de": "você", "texto": "encerrada no painel" + (f": {fim['nota']}" if fim.get("nota") else "")})
+        cont = acoes.get("contatv:" + a["chave"])
+        a.pop("confirmar", None)
+        if a["status"] == "andamento" and agora - max(a["inicio_ts"], cont["ts"] if cont else 0) >= coletor.ATIVIDADE_MAX:
+            a["confirmar"] = {"desde": a["inicio_ts"]}
+    presencas = [dict(p) for p in (d.get("presencas") or [])]
+    for p in presencas:
+        s = acoes.get("saida:" + p["chave"])
+        if s and not p.get("saida_ts"):
+            p.update(saida_ts=s["ts"], saida_manual=True)
+    # "durante manutenção": ocorrência que começou com manutenção em andamento na mesma usina
+    for o in ocorrencias:
+        o["durante_manutencao"] = None
+        for a in vivas:
+            if a["chave_usina"] == o["chave_usina"] and a["inicio_ts"] - 600 <= o["inicio_ts"] and \
+               (a["status"] == "andamento" or (a.get("fim_ts") or 0) >= o["inicio_ts"]):
+                o["durante_manutencao"] = {"descricao": a["descricao"], "ate_agora": a["status"] == "andamento"}
+                break
+    for u in usinas:
+        u["manutencao"] = next((a["descricao"] for a in vivas if a["chave_usina"] == u["jid"] and a["status"] == "andamento"), None)
+        u["em_campo"] = [p["tecnico"] for p in presencas if p["chave_usina"] == u["jid"] and not p.get("saida_ts")]
+    vivas.sort(key=lambda a: (a["status"] != "andamento", -a["inicio_ts"]))
+    # concluídas/canceladas dos últimos 7 dias (histórico + o que acabou de fechar)
+    recentes = {a["chave"]: a for a in relatorio.manutencoes_periodo(agora - 7 * 86400, agora)[0] if a.get("status") != "andamento"}
+    recentes.update({a["chave"]: a for a in vivas if a["status"] != "andamento"})
+    return vivas, presencas, sorted(recentes.values(), key=lambda a: -(a.get("fim_ts") or a["inicio_ts"]))[:60]
 
 
 def acoes_por_mensagem(acoes):
@@ -658,7 +705,8 @@ class Pagina(http.server.BaseHTTPRequestHandler):
             return self.responder(400, {"erro": "ação de plantão inválida"})
         if self.path == "/api/acao":
             chave, tipo = corpo.get("chave"), corpo.get("tipo")
-            if not chave or tipo not in ("respondi", "resolvido", "ignorar", "lembrar", "desfazer", "ciente", "encerrar", "reabrir", "acompanhar"):
+            if not chave or tipo not in ("respondi", "resolvido", "ignorar", "lembrar", "desfazer", "ciente", "encerrar", "reabrir", "acompanhar",
+                                                  "fim_manutencao", "continua_manutencao", "reabrir_manutencao", "saida_tecnico"):
                 return self.responder(400, {"erro": "ação inválida"})
             with trava:
                 acoes = ler_acoes()
@@ -670,6 +718,18 @@ class Pagina(http.server.BaseHTTPRequestHandler):
                 elif tipo == "reabrir":
                     acoes.pop("enc:" + chave, None)
                     acoes["keep:" + chave] = {"tipo": "reabrir", "ts": int(time.time()), "ids": ids}
+                elif tipo == "fim_manutencao":
+                    acoes["fimatv:" + chave] = {"tipo": tipo, "ts": int(time.time()), "nota": str(corpo.get("nota", ""))[:200]}
+                elif tipo == "continua_manutencao":
+                    acoes["contatv:" + chave] = {"tipo": tipo, "ts": int(time.time())}
+                elif tipo == "reabrir_manutencao":
+                    acoes.pop("fimatv:" + chave, None)
+                    hist = relatorio._ler(relatorio.MANUT, {})  # a cópia guardada também volta a "em andamento"
+                    if chave in hist and hist[chave].get("manual"):
+                        hist[chave].update(status="andamento", fim_ts=None, fim_msg=None, manual=False)
+                        relatorio._gravar(relatorio.MANUT, hist)
+                elif tipo == "saida_tecnico":
+                    acoes["saida:" + chave] = {"tipo": tipo, "ts": int(time.time())}
                 elif tipo == "acompanhar":
                     acoes["acomp:" + chave] = {"tipo": "acompanhar", "ts": int(time.time()), "ids": ids}
                 elif tipo == "encerrar":

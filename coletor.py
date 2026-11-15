@@ -578,7 +578,7 @@ def montar_ocorrencias(eventos, usinas, vinculos=None):
     return ocorrencias, todas, boletins
 
 
-ATIVIDADE_MAX = 14 * 3600  # atividade sem "concluída" depois disso sai como "sem registro de término"
+ATIVIDADE_MAX = 12 * 3600  # atividade sem "concluída" depois disso: o painel pergunta "Ainda em manutenção?"
 PRESENCA_MAX = 14 * 3600   # entrada sem saída depois disso deixa de contar como "em campo"
 
 
@@ -609,9 +609,6 @@ def montar_manutencoes(eventos, usinas, ocorrencias, agora=None):
                                    "descricao": e["descricao"] or "Atividade", "inicio_ts": e["ts"], "fim_ts": e["ts"],
                                    "status": "concluida" if e["tipo"] == "atividade_fim" else "cancelada",
                                    "grupos": [e["grupo"]], "msg": e["msg"], "fim_msg": e["msg"]})
-    for a in atividades:
-        if a["status"] == "andamento" and agora - a["inicio_ts"] > ATIVIDADE_MAX:
-            a["status"], a["fim_ts"] = "sem_termino", a["inicio_ts"] + ATIVIDADE_MAX
 
     presencas, por_pessoa = [], {}
     for e in sorted((e for e in eventos if e["tipo"] in ("entrada", "saida")), key=lambda e: e["ts"]):

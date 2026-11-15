@@ -69,6 +69,9 @@ def main():
     relatorio._gravar(relatorio.HIST, hist)
     # manutenções do COG e visitas (entrada/saída) do mesmo período
     atividades, presencas = coletor.montar_manutencoes(eventos, usinas, ocorrencias, agora=agora)
+    for a in atividades:
+        if a["status"] == "andamento" and a["inicio_ts"] < limite_ao_vivo:
+            a["status"], a["fim_ts"] = "sem_termino", a["inicio_ts"] + coletor.ATIVIDADE_MAX
     for arq, itens, campo in ((relatorio.MANUT, atividades, "inicio_ts"), (relatorio.VISITAS, presencas, "entrada_ts")):
         h = relatorio._ler(arq, {})
         if "--substituir" in sys.argv:
