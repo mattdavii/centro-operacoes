@@ -100,7 +100,7 @@
   .usi::before { content: ""; position: absolute; top: 6px; right: 7px; width: 8px; height: 8px; border-radius: 50%; background: var(--cor); box-shadow: 0 0 8px var(--cor); }
   .usi.critico { --cor: var(--vermelho); border-color: #6b1220; background: #1b0710; } .usi.critico::before { animation: pisca 1s infinite; }
   .usi.alerta { --cor: var(--amarelo); border-color: #5c4310; background: #171206; }
-  .usi.normalizado { --cor: var(--verde); } .usi.ativa { --cor: #2b7a5a; } .usi.quieta { --cor: var(--cinza); opacity: .55; }
+  .usi.normalizado { --cor: var(--verde); } .usi.ativa { --cor: #2b7a5a; } .usi.quieta { --cor: var(--cinza); opacity: .55; } .usi.parada { --cor: #3a4252; opacity: .4; }
   .usi .n { font-size: 11px; font-weight: 700; color: var(--titulo); padding-right: 12px; line-height: 1.2; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
   .usi .m { font-family: var(--mono); font-size: 10px; color: var(--fraco); margin-top: 3px; }
   .legenda { display: flex; gap: 12px; flex-wrap: wrap; font-size: 10px; color: var(--fraco); margin-top: 8px; }
@@ -537,7 +537,7 @@
       <h2>QUADRO DE USINAS <span class="qtd" id="q-usi">0</span></h2>
       <div class="corpo medio"><div class="quadro" id="quadro"></div>
         <div class="legenda"><span><i style="background:var(--vermelho)"></i>crítica</span><span><i style="background:var(--amarelo)"></i>alerta</span>
-          <span><i style="background:var(--verde)"></i>normalizada</span><span><i style="background:#2b7a5a"></i>sem ocorrência</span><span><i style="background:var(--cinza)"></i>sem mensagens <span class="jan">48</span>h</span></div></div>
+          <span><i style="background:var(--verde)"></i>normalizada</span><span><i style="background:#2b7a5a"></i>sem ocorrência</span><span><i style="background:var(--cinza)"></i>sem mensagens <span class="jan">48</span>h</span><span><i style="background:#3a4252;opacity:.6"></i>grupo parado (dias sem msg)</span></div></div>
     </section>
     <section class="painel">
       <h2>EM CAMPO · MANUTENÇÕES <span class="qtd" id="q-campo">0</span></h2>
@@ -901,7 +901,7 @@ function desenhar() {
   $("v-crit").textContent = crit; $("k-crit").classList.toggle("alarme", abertas.some(o => o.sev === "critico" && !o.ciente));
   $("v-alerta").textContent = abertas.length - crit;
   const afetadas = d.usinas.filter(u => u.estado === "critico" || u.estado === "alerta").length;
-  $("v-usinas").textContent = afetadas; $("s-usinas").textContent = `de ${d.usinas.length} no quadro`;
+  $("v-usinas").textContent = afetadas; $("s-usinas").textContent = `de ${d.usinas.length} usinas · ${d.usinas.filter(u => u.estado !== "parada").length} com conversa`;
   $("v-norm").textContent = normalizadas.length;
   const porInatividade = normalizadas.filter(o => (o.normalizado || {}).motivo === "inatividade").length;
   $("s-norm").textContent = porInatividade ? `${porInatividade} por inatividade` : "ocorrências fechadas";
@@ -959,10 +959,12 @@ function desenhar() {
   }
 
   // quadro de usinas
+  const paradas = d.usinas.filter(u => u.estado === "parada").length;
   $("q-usi").textContent = d.usinas.length;
+  $("q-usi").title = `${d.usinas.length - paradas} com conversa nos últimos dias · ${paradas} sem mensagem recente (em cinza, no fim)`;
   $("quadro").innerHTML = d.usinas.map(u => {
     const dica = `${u.grupo}\n${u.ultima ? "última: " + dhm(u.ultima_ts) + " " + u.ultima.de + ": " + u.ultima.texto : ""}`;
-    const meta = u.abertas ? `${u.abertas} aberta${u.abertas > 1 ? "s" : ""}` : u.msgs_24h != null ? `${u.msgs_24h} msgs` : "via COG";
+    const meta = u.abertas ? `${u.abertas} aberta${u.abertas > 1 ? "s" : ""}` : u.estado === "parada" ? "sem msg" : u.msgs_24h != null ? `${u.msgs_24h} msgs` : "via COG";
     return `<div class="usi ${u.estado}" title="${esc(dica)}"><div class="n">${esc(u.nome.replace(/^UFVs?\s+/i, ""))}</div>
       <div class="m">${meta}${u.ultima_ts ? " · " + dur(agora() - u.ultima_ts) : ""}</div>
       ${u.manutencao || (u.em_campo || []).length ? `<span class="icones" title="${esc([u.manutencao ? "Manutenção: " + u.manutencao : "", (u.em_campo || []).length ? "Em campo: " + u.em_campo.join(", ") : ""].filter(Boolean).join("\n"))}">${u.manutencao ? "🔧" : ""}${(u.em_campo || []).length ? "👷" : ""}</span>` : ""}</div>`;

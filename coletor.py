@@ -70,14 +70,51 @@ def status():
         return {"conexao": None, "lacunas": None, "erro": str(e)}
 
 
-def chats_ativos(dias=DIAS):
+def chats_ativos(dias=DIAS, todos=None):
+    """Conversas com mensagem nos últimos `dias`. todos: lista onde guardar todas as conversas (para o quadro de usinas)."""
     desde = dt.datetime.now().astimezone() - dt.timedelta(days=dias)
     saida = []
-    for c in wa("chats", "--limit", "500")["chats"]:
+    lista = wa("chats", "--limit", "500")["chats"]
+    if todos is not None:
+        todos.extend(lista)
+    for c in lista:
         if not c.get("lastMessage") or str(c.get("jid", "")).startswith("status@") or c.get("name") == "Status":
             continue
         if dt.datetime.fromisoformat(c["lastMessage"]) >= desde:
             saida.append(c)
+    return saida
+
+
+GRUPO_GERAL = re.compile(r"^(manutencao|reparos?|o&m)\b")
+
+
+def usinas_paradas(todos, ja):
+    """Grupos de usina (nome com UFV/usina) que não foram lidos por não terem mensagem recente.
+    ja: as usinas do quadro. Grupo de manutenção geral não entra; o mesmo nome de usina em dois grupos
+    (Gerar e Élis) vira um quadradinho só, e o que já está no quadro não repete."""
+    vistas = [assinatura(u["nome"]) for u in ja]
+    saida, assin = [], []
+    jids = {u["jid"] for u in ja}
+    for c in sorted(todos, key=lambda c: c.get("lastMessage") or "", reverse=True):
+        jid, nome = str(c.get("jid", "")), c.get("name") or ""
+        if not jid.endswith("@g.us") or jid in jids or not USINA.search(nome) or GRUPO_GERAL.match(sem_acento(nome)):
+            continue
+        rot = rotulo_usina(nome)
+        a = assinatura(rot)
+        casa = (lambda b: mesma_usina(a, b)) if a[0] else (lambda b: b == a)  # "MG V": só números, compara inteiro
+        if any(casa(v) for v in vistas):
+            continue
+        igual = next((u for u, b in zip(saida, assin) if casa(b)), None)
+        if igual:
+            igual["grupo"] += " + " + nome
+            continue
+        try:
+            ts = int(dt.datetime.fromisoformat(c["lastMessage"]).timestamp()) if c.get("lastMessage") else None
+        except ValueError:
+            ts = None
+        saida.append({"jid": jid, "nome": rot, "grupo": nome, "citados": {}, "msgs_24h": 0,
+                      "ultima_ts": ts, "ultima": None, "parada": True})
+        assin.append(a)
     return saida
 
 
@@ -854,7 +891,7 @@ def montar_ocorrencias(eventos, usinas, vinculos=None):
         oc = u.get("ocorrencias", [])
         abertas_u = [o for o in oc if not o["normalizado"]]
         u["estado"] = "critico" if any(o["sev"] == "critico" for o in abertas_u) else "alerta" if abertas_u else \
-                      "normalizado" if oc else ("ativa" if u.get("msgs_24h") else "quieta")
+                      "normalizado" if oc else ("ativa" if u.get("msgs_24h") else "parada" if u.get("parada") else "quieta")
         u["abertas"] = len(abertas_u)
         u.pop("ocorrencias", None)
         u.pop("assinatura", None)
@@ -985,7 +1022,8 @@ def coletar(cache=None, dias=DIAS, log=print):
     pendentes, erros = [], []
     eventos, usinas, feed, horas = [], [], [], {}
     vinculos = ler_vinculos()
-    chats = chats_ativos(dias)
+    todos_chats = []
+    chats = chats_ativos(dias, todos_chats)
     # a cada hora cheia as janelas de 24 h andam: reanalisa tudo (sem reler, os dados ficam no cache)
     hora_atual = int(time.time() // 3600)
     for c in chats:
@@ -1016,6 +1054,8 @@ def coletar(cache=None, dias=DIAS, log=print):
     for jid in list(cache):
         if jid not in {c["jid"] for c in chats}:
             del cache[jid]
+    # grupos de usina sem mensagem na janela: entram no quadro como "parada", para a carteira toda aparecer
+    usinas += usinas_paradas(todos_chats, usinas)
     pendentes.sort(key=lambda i: i["desde_ts"])
     codigos = {e["codigo"]: e["nome_codigo"] for e in sorted(eventos, key=lambda e: e["ts"]) if e.get("codigo") and e.get("nome_codigo")}
     ocorrencias, usinas, boletins = montar_ocorrencias(eventos, usinas, vinculos)
@@ -1032,7 +1072,7 @@ def coletar(cache=None, dias=DIAS, log=print):
     ocorrencias.sort(key=lambda o: (o["normalizado"] is not None, -o["ultima_ts"]))
     boletins.sort(key=lambda b: -b["ts"])
     feed.sort(key=lambda m: -m["ts"])
-    ordem = {"critico": 0, "alerta": 1, "normalizado": 2, "ativa": 3, "quieta": 4}
+    ordem = {"critico": 0, "alerta": 1, "normalizado": 2, "ativa": 3, "quieta": 4, "parada": 5}
     usinas.sort(key=lambda u: (ordem[u["estado"]], -(u["ultima_ts"] or 0)))
     inicio_h = int((time.time() - JANELA) // 3600 * 3600) + 3600
     atividade = [{"h": h, "n": horas.get(h, 0)} for h in range(inicio_h, int(time.time()) + 1, 3600)]

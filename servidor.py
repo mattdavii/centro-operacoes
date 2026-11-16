@@ -445,7 +445,7 @@ def ocorrencias_com_acoes(d, acoes):
             u["abertas"] = len(abertas)
             u["estado"] = "critico" if any(o["sev"] == "critico" for o in abertas) else "alerta" if abertas else "normalizado"
         usinas.append(u)
-    ordem = {"critico": 0, "alerta": 1, "normalizado": 2, "ativa": 3, "quieta": 4}
+    ordem = {"critico": 0, "alerta": 1, "normalizado": 2, "ativa": 3, "quieta": 4, "parada": 5}
     usinas.sort(key=lambda u: (ordem[u["estado"]], -(u["ultima_ts"] or 0)))
     # código da usina (o mesmo do KMZ) para os grupos que o COG nunca citou com código: casa pelo nome aprendido
     conhecidos = [(c, coletor.assinatura(n)) for c, n in relatorio.codigos().items()]
