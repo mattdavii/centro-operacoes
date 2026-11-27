@@ -961,6 +961,13 @@ def montar_ocorrencias(eventos, usinas, vinculos=None):
     return ocorrencias, todas, boletins
 
 
+def eh_ocorrencia(h):
+    """A mensagem que abriu/agravou a ocorrência ainda é ocorrência pelas regras atuais? (cronograma, procedimento,
+    frete, extintor, "foi reparado"... guardados por versões antigas saem do painel e do diário)"""
+    textos = [(h.get(k) or {}).get("texto") or "" for k in ("msg", "ultimo_msg")]
+    return any(classificar(sem_acento(t)) in ("critico", "alerta", "acompanha") for t in textos if t)
+
+
 # ---------- baixa de ocorrência antiga e pelo Status Operacional ----------
 # o boletim "✅ Em geração / todos os inversores em operação" fala de geração e inversores: não fecha tracker, câmera...
 BOLETIM_COBRE = re.compile(r"inversor|usina|ufv|desarm|disjuntor|52l|comunica|geracao|energia|religa|rearm|parad|deslig")

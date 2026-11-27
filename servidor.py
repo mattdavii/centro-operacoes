@@ -21,11 +21,7 @@ estado = {"dados": None, "sincronizando": False, "erro": None, "cache": {}, "tes
 REVISAO = 3600  # de hora em hora relê os grupos das ocorrências antigas ainda abertas
 
 
-def ocorrencia_de_verdade(h):
-    """A mensagem que abriu/agravou a ocorrência ainda é ocorrência pelas regras atuais? (cronograma, procedimento,
-    frete, extintor... guardados por versões antigas saem do painel)"""
-    textos = [(h.get(k) or {}).get("texto") or "" for k in ("msg", "ultimo_msg")]
-    return any(coletor.classificar(coletor.sem_acento(t)) in ("critico", "alerta", "acompanha") for t in textos if t)
+ocorrencia_de_verdade = coletor.eh_ocorrencia
 
 
 def antigas_abertas():
@@ -929,6 +925,19 @@ class Pagina(http.server.BaseHTTPRequestHandler):
             })
         if caminho == "/config.js":  # no app Android este arquivo traz o endereço do PC e a senha; aqui fica vazio
             return self.responder(200, b"", "application/javascript")
+        if caminho == "/api/diario-bordo":
+            # rascunho do Diário de Bordo do sobreaviso (as mesmas linhas do relatório de passagem), para o assistente
+            plantao = ler_plantao()
+            fim = float(q["fim"][0]) if "fim" in q else time.time()
+            inicio = float(q["inicio"][0]) if "inicio" in q else plantao["inicio_ts"] if plantao["ativo"] else fim - 86400
+            eps = relatorio.episodios_diario(relatorio.historico(inicio, fim), inicio)
+            return self.responder(200, {
+                "inicio": inicio, "fim": fim, "plantao": plantao, "colunas": relatorio.DIARIO_COLUNAS,
+                "linhas": [relatorio.linha_diario(o, i + 1) for i, o in enumerate(eps)],
+                "ocorrencias": [{"chave": o["chave"], "usina": o["usina"], "codigo": o.get("codigo"), "sev": o["sev"],
+                                 "inicio_ts": o["inicio_ts"], "aberta": not o.get("normalizado"), "status": o.get("status"),
+                                 "o_que_houve": relatorio._o_que_houve(o), "visitas": o.get("visitas") or [], "os": o.get("os") or [],
+                                 "texto": ((o.get("msg") or {}).get("texto") or "")[:400]} for o in eps]})
         if caminho == "/relatorio":
             plantao = ler_plantao()
             fim = float(q["fim"][0]) if "fim" in q else time.time()

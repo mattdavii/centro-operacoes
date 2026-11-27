@@ -100,6 +100,10 @@ def historico(inicio_ts, fim_ts):
     for o in _ler(HIST, {}).values():
         if not indicadores.de_usina(o):
             continue
+        if not o.get("normalizado"):
+            import coletor
+            if not coletor.eh_ocorrencia(o):
+                continue  # aberta por uma versão antiga, mas não é ocorrência pelas regras atuais
         fim_o = (o.get("normalizado") or {}).get("ts") or time.time()
         if o["inicio_ts"] <= fim_ts and fim_o >= inicio_ts:
             out.append(o)
