@@ -79,6 +79,18 @@ NAO_E_OCORRENCIA = [
     "Bom dia, @Fulano. Segue o cronograma de Itaberaí combinado em 12/11, com a situação de cada inversor parado",
     "Segue o procedimento técnico para verificação e coleta de dados do inversor visando à solicitação de garantia",
     "👋 Olá, Bom dia! Segue proposta da *TRANSPORTADORA X LTDA* 🚚 ORIGEM..: GUARULHOS 💰 VALOR: R$ 744,14 🔐 SEGURO...: ROUBO",
+    # alarme negado, pergunta, condicional, desligamento combinado, ar-condicionado da sala
+    "Usina sem alarme foi queda de energia",
+    "Na anula nao tem nenhum anomalia. Foi feito mes 08",
+    "Sem alarmes Ativos",
+    "Bom dia! Poderia verificar se os Inversores em UFV X tem algum alarme hoje?",
+    "estou em Cachoeira, foi realizado o reset dos alarmes? Não mostra ALARMES",
+    "Sobre o transformador queimado dessa planta, já temos uma causa raiz? Preciso de uma informação",
+    "poderia esta desligado UFV X 01 PARA REALIZAR UMA ATIVIDADE NO QGBT ?",
+    "vou precisar desligar a ufv X para verificar um falha no sistema de exaustão com autorização do supervisor",
+    "Sim, mas valida as condições dos equipamentos da usina também.. qualquer anomalia, reporta a gente aqui",
+    "Ar da sala de O&M da ufv II se encontra desligado",
+    "Vamos realizar uns testes pra ver se o raio não queimou as entradas de comunicação",
 ]
 # Status Operacional do COG: só as linhas ✅ dão baixa, e pela mesma usina
 _b = "*⚡ Status Operacional – Athon* 📅 Data: 23/11/2026\n\n✅ UFV DCS100 – Em geração / Todos os inversores em operação\n⚠️ UFV DCS200 – Em geração / Inversor 3 sem comunicação"
@@ -166,6 +178,9 @@ for frase, nome in [("Identificamos uma ocorrência na Usina Itaperuna. 🆔 OS:
 
 # são ocorrência (usina ainda parada esperando atendimento), mesmo sem palavra de falha
 E_OCORRENCIA = [
+    "Ele está com alarme de overcurrent",
+    "bom dia, pessoal estamos com alarme de ventilador externo no inv 4.3, poderiam verificar por gentileza?",
+    "Inversor 3 sem comunicação, sem alarme visível",
     "Só confirmando a posição das chaves. Por gentileza, manter informação que o projeto vai estar desligado na transferência de plantão.",
     "Para enviar um terceiro amanhã para religar o projeto.",
     "Usina continua desligada, técnico vai amanhã",

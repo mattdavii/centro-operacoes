@@ -911,6 +911,7 @@ class Pagina(http.server.BaseHTTPRequestHandler):
                 "app_versao": versoes()["app"], "silencio": ler_silencio(),
                 "plantao": (p.get("plantao") or {}).get("ativo"),
                 "ocorrencias": [{"chave": o["chave"], "usina": o["usina"], "inicio_ts": o["inicio_ts"], "ciente": o["ciente"],
+                                 "ultima_ts": o.get("ultima_ts") or o["inicio_ts"],
                                  "sev": "alerta" if (o.get("durante_manutencao") or {}).get("ate_agora") else o["sev"],
                                  "texto": (f"🔧 durante manutenção ({o['durante_manutencao']['descricao']}): "
                                            if (o.get("durante_manutencao") or {}).get("ate_agora") else "") + o["msg"]["texto"][:200]}

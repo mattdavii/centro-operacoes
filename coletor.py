@@ -189,7 +189,16 @@ NORMAL = re.compile(
     r"normaliza|restabelec|reestabelec|\bvoltou\b|voltaram|retornou|retornaram|resolvid|religad|religamento|"
     r"operando normal|em operacao normal|ja (esta|estao) (gerando|operando)|gerando normal|disjuntor (52l )?fechado")
 # assunto que cita falha/usina mas não é ocorrência: cronograma, procedimento, orçamento, frete, extintor
-NAO_OCORRENCIA = re.compile(r"\bcronograma\b|procedimento tecnico|\bproposta\b|\bfretes?\b|\borcamentos?\b|\bcotac|\bextintor")
+NAO_OCORRENCIA = re.compile(r"\bcronograma\b|procedimento tecnico|\bproposta\b|\bfretes?\b|\borcamentos?\b|\bcotac|\bextintor|"
+                            r"\bar (da sala|condicionado)\b|"
+                            # pergunta, não fato: "tem algum alarme hoje?", "foi realizado o reset dos alarmes?", "já temos a causa raiz?"
+                            r"\b(tem|ha|existe|consta)\s+(algum\s+)?alarmes?\b[^.?!]{0,60}\?|reset dos alarmes[^.?!]{0,20}\?|causa raiz[^.?!]{0,60}\?|"
+                            # desligamento combinado pra fazer um serviço: "vou precisar desligar a ufv ... para verificar"
+                            r"\b(vou|vamos|irei|iremos|preciso|precisar\w*|poderia\w*|podemos|pode)\s+(\w+\s+){0,3}deslig\w*[^.?!]{0,80}?\b(para|pra)\s+"
+                            r"(realizar|verificar|fazer|executar|trocar|substituir|uma atividade|atividade)")
+# o que nega ou só supõe o problema não conta: "usina sem alarme", "nenhuma anomalia", "qualquer anomalia reporta", "ver se o raio não queimou"
+NEGADO = re.compile(r"\b(sem|nenhum\w*|nao (mostra|tem|ha|apresenta|consta|aparece)( nenhum\w*)?|qualquer)\s+(alarmes?|anomalias?|falhas?|defeitos?)\b"
+                    r"(\s+ativos?)?|\b(ver|verificar|saber) se\b[^.?!]*")
 BOLETIM = re.compile(r"atualizacao das usinas|status operacional|geracao diaria|relatorio diario|resumo do dia")
 SO_COMUNICACAO = re.compile(r"falha de comunicacao|sem comunicacao|perda de comunicacao")
 GRAVE = re.compile(r"desarm|disjuntor|\btrip|tripou|parada|emergencial|incendio|acidente|protecao|rele")
@@ -629,6 +638,8 @@ def classificar(t):
         return None
     if NAO_OCORRENCIA.search(t) and "🟥" not in t and "🟩" not in t:
         return None
+    if "🟥" not in t:
+        t = NEGADO.sub(" ", t)
     if "🟩" in t and t.rfind("🟩") > t.rfind("🟥"):
         return "normal"  # resumo do COG: "🟥 Ocorrência ... 🟩 Normalização" — terminou normalizada
     if "🟥" not in t and eh_normalizacao(t):
