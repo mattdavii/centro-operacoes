@@ -647,6 +647,23 @@ def classificar(t):
     return None
 
 
+# "A geração subiu pra vocês?" → "Subiu": a resposta curta confirma que a usina voltou a gerar
+PERGUNTA_SUBIU = re.compile(r"\b(geracao|potencia|usina|ufv|inversor\w*)\b[^?]{0,40}\b(subiu|subiram|voltou|voltaram|retornou)\b[^?]{0,60}\?")
+RESPOSTA_SUBIU = re.compile(r"^\W*(sim[,.!\s]*)?(ja\s+)?(subiu|subiram|voltou|voltaram|retornou)(\s+(sim|ja|agora|aqui))*\W*$")
+
+
+def confirma_subida(m, mensagens):
+    """m é "Subiu"/"Voltou sim" respondendo, em até 15 min, a uma pergunta se a geração subiu?"""
+    if not RESPOSTA_SUBIU.match(sem_acento(texto(m))):
+        return False
+    return any(0 < m.get("ts", 0) - x.get("ts", 0) <= 900 and PERGUNTA_SUBIU.search(sem_acento(texto(x)))
+               for x in mensagens if x is not m)
+
+
+# "geração subiu" dito direto também vale
+GERACAO_SUBIU = re.compile(r"\b(geracao|potencia)\s+(ja\s+)?(subiu|voltou|retornou)\b(?!\s*\?)")
+
+
 CORRECAO = re.compile(r"^(mas|porem|so que|entretanto|contudo)\b|\bainda\b.*\b(abaixo|baixa|nao|sem|falha|oscil|parad|deslig)|"
                       r"\bnao (segur|aguent|vai segurar)|\bvoltou a (cair|desarmar|falhar)")
 
@@ -724,6 +741,8 @@ def operacao(chat, dados, agora=None, janela=None):
                             "codigo": cod.group(1) if cod else None, "nome_codigo": None})
             continue
         tipo = classificar(t)
+        if not tipo and (confirma_subida(m, base) or (GERACAO_SUBIU.search(t) and not t.rstrip().endswith("?"))):
+            tipo = "normal"
         if tipo == "normal" and desmentida(m, base):
             tipo = None
         if not tipo:
@@ -1016,7 +1035,8 @@ def revisar_antigas(abertas, usinas=None, dias=14, log=print):
                     continue
                 bruto = texto(m)
                 t = sem_acento(bruto)
-                if not t or "🟥" in t or classificar_manutencao(bruto) or not eh_normalizacao(t) or desmentida(m, msgs):
+                normalizou = eh_normalizacao(t) or confirma_subida(m, msgs) or (GERACAO_SUBIU.search(t) and not t.rstrip().endswith("?"))
+                if not t or "🟥" in t or classificar_manutencao(bruto) or not normalizou or desmentida(m, msgs):
                     continue
                 if especifico and not BOLETIM_NAO_COBRE.search(t):
                     continue  # "Inversor 1.5 religado" não fecha "zonas com alarme disparado"

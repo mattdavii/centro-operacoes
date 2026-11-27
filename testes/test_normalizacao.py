@@ -200,6 +200,16 @@ msgs2 = [{"id": "a", "ts": base, "sender": "x", "text": "Usina religada as 07:01
 if coletor.desmentida(msgs2[0], msgs2):
     erros += 1
     print("✗ mensagem comum depois não deveria desfazer a baixa")
+# "A geração subiu?" → "Subiu": a resposta curta dá baixa; "Subiu" solto, sem a pergunta, não
+_p = {"id": "p", "ts": base, "sender": "Fulano", "text": "A geração subiu pra vocês @Centro Operação Gera?"}
+for resposta, depois, esperado in [("Subiu", 240, True), ("Subiu sim", 60, True), ("Ainda não", 60, False), ("Subiu", 3600, False)]:
+    _r = {"id": "r", "ts": base + depois, "sender": "COG", "text": resposta}
+    if coletor.confirma_subida(_r, [_p, _r]) != esperado:
+        erros += 1
+        print("✗ resposta 'subiu':      ", resposta, depois)
+if coletor.confirma_subida({"id": "s", "ts": base, "text": "Subiu"}, [{"id": "s", "ts": base, "text": "Subiu"}]):
+    erros += 1
+    print("✗ 'Subiu' sem pergunta não deveria dar baixa")
 # volta de comunicação não fecha crítica de desarme (Mucugê 14/11: usina parada esperando o técnico)
 for frase, so_com in [("Comunicação do Relé LT retornou", True), ("Comunicação restabelecida, usina gerando normal", False),
                       ("Usina religada as 07:01", False), ("Logger voltou a comunicar", True), ("PD encerra aqui a OS", False)]:
