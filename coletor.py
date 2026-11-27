@@ -217,6 +217,7 @@ CONTEXTO_SEG = 20 * 60  # num grupo geral, mensagem sem usina vale a usina citad
 MONTAGEM = JANELA  # ocorrências montadas com a mesma janela (3 dias deixava críticas velhas abertas para sempre);
                    # a identidade entre remontagens fica com as marcações, que guardam as mensagens (servidor.py)
 SEM_REGISTRO = 24 * 3600  # crítica sem aviso novo por esse tempo sai como "sem registro de normalização"
+BAIXA_INATIVIDADE = 5 * 86400  # 5 dias sem nenhuma mensagem (nem "Continua acompanhando"): baixa por inatividade
 INATIVIDADE = 6 * 3600  # alerta sem aviso novo por esse tempo sai sozinho (crítica de usina não: precisa de normalização)
 JUNTAR = 3 * 3600      # alertas da mesma usina, sem normalização no meio e com menos que isso de intervalo, são uma ocorrência só
 PALAVRAS_VAZIAS = {"ufv", "ufvs", "usina", "usinas", "gerar", "gera", "cog", "elis", "energia", "grupo", "dos", "das",

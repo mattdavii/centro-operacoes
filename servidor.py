@@ -452,6 +452,13 @@ def ocorrencias_com_acoes(d, acoes):
         acomp = acoes.get("acomp:" + o["chave"]) or herdadas.get("acomp")
         base = max(o["ultima_ts"], acomp["ts"] if acomp else 0)
         o.pop("confirmar", None)
+        # 5 dias sem resposta: baixa por inatividade (sem confirmação; "reabrir" ou mensagem nova reabrem)
+        base_baixa = max(base, manter["ts"] if manter else 0)
+        if not o["normalizado"] and not o.get("generico") and agora - base_baixa >= coletor.BAIXA_INATIVIDADE:
+            fim = base_baixa + coletor.BAIXA_INATIVIDADE
+            o["normalizado"] = {"ts": fim, "de": "painel", "motivo": "inatividade",
+                                "texto": f"sem resposta há {coletor.BAIXA_INATIVIDADE // 86400} dias: baixa por inatividade"}
+            o["fim_ts"] = fim
         if not o["normalizado"] and not o.get("generico") and agora - base >= coletor.INATIVIDADE:
             o["confirmar"] = {"desde": o["ultima_ts"], "acompanhando": bool(acomp)}
         ocorrencias.append(o)
