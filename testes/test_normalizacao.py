@@ -30,6 +30,15 @@ DA_BAIXA = [
     "*UFV ABC200 – Usina 2* > Com auxilio da vigilância novamente, constatamos que os inversores estão em operação",
     "a vigilância confirmou que estava ok",
     "@COG foi identificado o dinjuntor do padrão de entrada desarmado ( em trip) após as devidas verificações nada de anormal foi constatado disjuntor foi fechado",
+    # jeitos informais de quem está na usina (casos reais, 17–26/11)
+    "Ufv Ok.",
+    "@Cog Élis Energia aqui está tudo normal",
+    "Tudo normal tem internet usina em operação",
+    "Usina comunicando e em geração",
+    "Ressaltando que as UFVs segue todas em geração",
+    "*UFV São Pedro* - Relé LT comunicando.",
+    "@Cog Élis Energia testes finalizados, comandos 100% operacionais",
+    "@Centro Operação Gera foi reparado o cabo de Rede que apresentava defeito. Poderia confirmar?",
     "* *UFV QSS100 – Quissamã 100* *🔌🟥 Ocorrência: Disjuntor 52L aberto* > Proteções atuadas: > • 27 (Subtensão) > Horário do desarme: 18h26min *🔌🟩 Normalização: Disjuntor 52L Fechado* > Horário de fechamento: 19h02min",
 ]
 NAO_DA_BAIXA = [
@@ -56,12 +65,31 @@ NAO_DA_BAIXA = [
     "Penedo comunicação parece que retornou, estamos verificando",
     "Inversor 05 religado, mas o inversor 06 continua em falha",
     "Posso encerrar a OS?",
+    "usina ainda não está em operação",
+    "a usina não está em geração",
+    "tudo ok na usina?",
+    "Finalizado verificações na usina",
+    "Saída UFV São Pedro 17:04",
 ]
 
 # não são ocorrência: manobra/desligamento combinado
 NAO_E_OCORRENCIA = [
     "A usina será desligada amanhã às 8h para a preventiva",
+    "Substituídos extintores deixados pela Previncendio durante processo de manutenção",
+    "Bom dia, @Fulano. Segue o cronograma de Itaberaí combinado em 12/11, com a situação de cada inversor parado",
+    "Segue o procedimento técnico para verificação e coleta de dados do inversor visando à solicitação de garantia",
+    "👋 Olá, Bom dia! Segue proposta da *TRANSPORTADORA X LTDA* 🚚 ORIGEM..: GUARULHOS 💰 VALOR: R$ 744,14 🔐 SEGURO...: ROUBO",
 ]
+# Status Operacional do COG: só as linhas ✅ dão baixa, e pela mesma usina
+_b = "*⚡ Status Operacional – Athon* 📅 Data: 23/11/2026\n\n✅ UFV DCS100 – Em geração / Todos os inversores em operação\n⚠️ UFV DCS200 – Em geração / Inversor 3 sem comunicação"
+_l = [{"ts": t, "nome": n} for t, n in coletor.linhas_ok(_b, 2_000_000_000)]
+for o, esperado in [({"usina": "DCS100 – Descalvado", "ultima_ts": 0, "msg": {"texto": "Inversor 2 parado"}}, True),
+                    ({"usina": "DCS200 – Descalvado 2", "ultima_ts": 0, "msg": {"texto": "Inversor 3 parado"}}, False),
+                    ({"usina": "DCS100 – Descalvado", "ultima_ts": 0, "msg": {"texto": "Tracker 12 parado"}}, False),
+                    ({"usina": "DCS100 – Descalvado", "ultima_ts": 2_000_000_000, "msg": {"texto": "Usina desarmada"}}, False)]:
+    if bool(coletor.baixa_por_boletim(o, _l)) != esperado:
+        erros += 1
+        print("✗ baixa por boletim:     ", o["usina"], o["msg"]["texto"])
 
 # gravidade: crítica só quando a usina toda está fora; falha só de inversor, de relé ou alarme falso é alerta
 for frase, nivel in [

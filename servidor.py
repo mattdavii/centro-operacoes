@@ -16,7 +16,23 @@ ACOES = os.path.join(DADOS, "acoes.json")
 PLANTAO = os.path.join(DADOS, "plantao.json")  # {"inicio": "2026-11-14T00:00", "fim": "2026-11-16T08:00", "equipe": [...]}
 
 trava = threading.Lock()
-estado = {"dados": None, "sincronizando": False, "erro": None, "cache": {}, "teste": None}
+estado = {"dados": None, "sincronizando": False, "erro": None, "cache": {}, "teste": None,
+          "revisadas": {}, "linhas_antigas": [], "revisao_ts": 0}
+REVISAO = 3600  # de hora em hora relê os grupos das ocorrências antigas ainda abertas
+
+
+def ocorrencia_de_verdade(h):
+    """A mensagem que abriu/agravou a ocorrência ainda é ocorrência pelas regras atuais? (cronograma, procedimento,
+    frete, extintor... guardados por versões antigas saem do painel)"""
+    textos = [(h.get(k) or {}).get("texto") or "" for k in ("msg", "ultimo_msg")]
+    return any(coletor.classificar(coletor.sem_acento(t)) in ("critico", "alerta", "acompanha") for t in textos if t)
+
+
+def antigas_abertas():
+    d = estado["dados"] or {}
+    vivas = {o["chave"] for o in d.get("ocorrencias") or []}
+    return [h for k, h in relatorio._ler(relatorio.HIST, {}).items()
+            if k not in vivas and not h.get("normalizado") and not h.get("generico") and indicadores.de_usina(h)]
 TESTE_DURA = 180  # o alarme de teste fica "aberto" por 3 min, o suficiente para o celular consultar e tocar
 
 
@@ -217,7 +233,13 @@ def manutencoes_com_acoes(d, acoes, ocorrencias, usinas):
                      fim_msg={"ts": fim["ts"], "de": "você", "texto": "encerrada no painel" + (f": {fim['nota']}" if fim.get("nota") else "")})
         cont = acoes.get("contatv:" + a["chave"])
         a.pop("confirmar", None)
-        if a["status"] == "andamento" and agora - max(a["inicio_ts"], cont["ts"] if cont else 0) >= coletor.ATIVIDADE_MAX:
+        base = max(a["inicio_ts"], cont["ts"] if cont else 0)
+        if a["status"] == "andamento" and agora - base >= coletor.ATIVIDADE_SEM_FIM:
+            # o COG quase nunca avisa o fim: sem "concluída" nem AINDA EM ANDAMENTO em 24 h, sai sozinha
+            a.update(status="concluida", fim_ts=base + coletor.ATIVIDADE_SEM_FIM, sem_registro=True,
+                     fim_msg={"ts": base + coletor.ATIVIDADE_SEM_FIM, "de": "painel",
+                              "texto": "sem aviso de término em 24 h (baixa automática)"})
+        elif a["status"] == "andamento" and agora - base >= coletor.ATIVIDADE_MAX:
             a["confirmar"] = {"desde": a["inicio_ts"]}
     presencas = [dict(p) for p in (d.get("presencas") or [])]
     for p in presencas:
@@ -392,7 +414,9 @@ def ocorrencias_com_acoes(d, acoes):
             continue
         if set(h.get("ids") or []) & ids_vivos:
             continue
-        fim = normalizacao_posterior(h, d, vivas)
+        if not ocorrencia_de_verdade(h):
+            continue  # não é ocorrência pelas regras atuais (cronograma, procedimento, frete...)
+        fim = normalizacao_posterior(h, d, vivas) or estado["revisadas"].get(k)
         if fim:
             guardadas.append(dict(h, normalizado=fim, fora_da_janela=True))  # resolvida depois: dá baixa (e o histórico guarda)
             continue
@@ -462,6 +486,24 @@ def ocorrencias_com_acoes(d, acoes):
     for o in ocorrencias:
         if not o.get("codigo"):
             o["codigo"] = por_jid.get(o["chave_usina"])
+    # Status Operacional do COG: "✅ UFV X – Em geração / todos os inversores em operação" depois do último aviso
+    linhas = (d.get("linhas_ok") or []) + estado["linhas_antigas"]
+    mudou = False
+    for i, o in enumerate(ocorrencias):
+        if not o["normalizado"] and not o.get("reaberta"):
+            nz = coletor.baixa_por_boletim(o, linhas)
+            if nz:
+                ocorrencias[i] = o = dict(o, normalizado=nz, fim_ts=nz["ts"], confirmar=None)
+                o.pop("confirmar", None)
+                mudou = True
+    if mudou:
+        ocorrencias.sort(key=lambda o: (o["normalizado"] is not None, -o["ultima_ts"]))
+        for u in usinas:
+            oc = [o for o in ocorrencias if o["chave_usina"] == u["jid"]]
+            if oc:
+                abertas = [o for o in oc if not o["normalizado"]]
+                u["abertas"] = len(abertas)
+                u["estado"] = "critico" if any(o["sev"] == "critico" for o in abertas) else "alerta" if abertas else "normalizado"
     for lista in (d.get("atividades") or [], d.get("presencas") or []):
         for i in lista:
             if not i.get("codigo"):
@@ -488,6 +530,14 @@ def sincronizar_sempre():
                 estado["dados"], estado["erro"] = dados, None
                 painel = montar()
             registrar(painel)
+            if time.time() - estado["revisao_ts"] >= REVISAO:
+                estado["revisao_ts"] = time.time()
+                achadas, linhas = coletor.revisar_antigas(antigas_abertas(), (estado["dados"] or {}).get("usinas"), log=lambda s: print(time.strftime("%H:%M:%S"), s, flush=True))
+                with trava:
+                    estado["revisadas"].update(achadas)
+                    estado["linhas_antigas"] = linhas
+                    painel = montar()
+                registrar(painel)
         except Exception as e:
             estado["erro"] = f"sincronização falhou: {e}"
             traceback.print_exc()

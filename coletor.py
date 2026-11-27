@@ -173,7 +173,7 @@ def sem_acento(s):
 
 CRITICO = re.compile(
     r"desarm|\btrip\b|tripou|disparou|usina (parada|caiu|desligou|fora)|parada total|sem geracao|geracao zerad|"
-    r"zerou a geracao|incendio|\bfogo\b|fumaca|explos|curto[- ]?circuito|acidente|choque eletrico|emergencia|"
+    r"zerou a geracao|\bincendio|\bfogo\b|fumaca|explos|curto[- ]?circuito|acidente|choque eletrico|emergencia|"
     r"falta de energia|apagao|religador (abriu|atuou|desarmou)|disjuntor (geral )?(abriu|atuou|desarmou)|"
     r"protecao (atuou|atuada)|rele (atuou|atuado)|bloqueio da protecao|desligamento automatico|"
     r"atuacao d[oa] (rele|protecao|funcao|\d{2}\w?\b)|"
@@ -188,6 +188,8 @@ ALERTA = re.compile(
 NORMAL = re.compile(
     r"normaliza|restabelec|reestabelec|\bvoltou\b|voltaram|retornou|retornaram|resolvid|religad|religamento|"
     r"operando normal|em operacao normal|ja (esta|estao) (gerando|operando)|gerando normal|disjuntor (52l )?fechado")
+# assunto que cita falha/usina mas não é ocorrência: cronograma, procedimento, orçamento, frete, extintor
+NAO_OCORRENCIA = re.compile(r"\bcronograma\b|procedimento tecnico|\bproposta\b|\bfretes?\b|\borcamentos?\b|\bcotac|\bextintor")
 BOLETIM = re.compile(r"atualizacao das usinas|status operacional|geracao diaria|relatorio diario|resumo do dia")
 SO_COMUNICACAO = re.compile(r"falha de comunicacao|sem comunicacao|perda de comunicacao")
 GRAVE = re.compile(r"desarm|disjuntor|\btrip|tripou|parada|emergencial|incendio|acidente|protecao|rele")
@@ -254,7 +256,13 @@ NORMAL_FATO = re.compile(
     r"\bgerando normal|\boperando normal|"
     r"\b(esta|estao|segue|seguem|encontra-se|encontram-se) (em operacao|ok|operante)\b|"
     r"\b(confirm|constat|verific)\w* que [^.?!]{0,40}\b(esta|estao|estava|estavam) (ok|normal|em operacao|operando|gerando)\b|"
-    r"\bfoi realizad[oa] o? ?(fechamento|religamento|rearme)\b|\bfechamento realizado\b")
+    r"\bfoi realizad[oa] o? ?(fechamento|religamento|rearme)\b|\bfechamento realizado\b|"
+    # jeitos informais de quem está na usina: "Ufv Ok.", "aqui está tudo normal", "usina em operação",
+    # "usina comunicando e em geração", "comandos 100% operacionais", "foi reparado o cabo"
+    r"\b(ufv|usina)\s+(\w+\s+){0,2}ok\b|\btudo (esta |segue )?(normal|ok)\b|"
+    r"\b(ufvs?|usinas?)\b(?:(?!\b(nao|sem|ainda)\b)[^.?!]){0,40}\bem (operacao|geracao)\b|"
+    r"\b(rele|logger|datalogger|usina|ufv|inversor\w*)( lt| \d+)?\s+(\w+\s+)?comunicando\b|"
+    r"\b(100 ?%|totalmente|plenamente) operaciona|\b(foi|foram) (reparad|corrigid)\w*")
 # o que desfaz a afirmação, quando aparece pouco antes da palavra
 NEGACAO = re.compile(r"\b(nao|n|nem|nunca|sem|ainda nao)\s+(\w+\s+){0,2}$")
 INTENCAO = re.compile(r"\b(vou|vamos|irei|iremos|vai|vao|para|pra|se|posso|pode|podemos|podem|aguardando|aguardar|"
@@ -433,6 +441,37 @@ def so_comunicacao(t):
     return bool(re.search(r"comunica|logger|scada|monitoramento|online|sinal", t)) and not VOLTA_USINA.search(t)
 
 
+LINHA_OK = re.compile(r"✅\W*(?:ufv\s+)?(.{2,60}?)\s*[–—-]\s*em geracao")
+DATA_BOLETIM = re.compile(r"data:\W*(\d{1,2})/(\d{1,2})/(\d{4})")
+
+
+def linhas_ok(bruto, ts):
+    """Usinas dadas como ✅ em geração num boletim "Status Operacional" do COG: [(ts, nome)]. O boletim da manhã
+    às vezes fala do dia anterior ("Data: 23/11" postado em 24/11): aí vale o fim daquele dia."""
+    t = sem_acento(bruto or "").replace("*", "")
+    if "status operacional" not in t:
+        return []
+    m = DATA_BOLETIM.search(t)
+    if m:
+        try:
+            fim_dia = dt.datetime(int(m.group(3)), int(m.group(2)), int(m.group(1)), 18).timestamp()
+            ts = min(ts, fim_dia)
+        except ValueError:
+            pass
+    return [(ts, x.group(1).strip(" *")) for linha in t.split("\n") for x in [LINHA_OK.search(linha)] if x]
+
+
+def casa_boletim(o, nome):
+    """A linha do boletim ("dcs100", "pederneiras") é a usina da ocorrência? Pelo código, se os dois têm; senão pelo nome."""
+    cod = re.match(r"([a-z]{2,4})\s?(\d{3})\b", nome)
+    m = re.match(r"([A-Z]{2,4}\d{3})", o.get("usina") or "")
+    oc = o.get("codigo") or (m.group(1) if m else None)
+    if cod:
+        return bool(oc) and chave_codigo(cod.group(1).upper() + cod.group(2)) == chave_codigo(oc)
+    rot = re.sub(r"^[A-Z]{2,4}\d{3}(/\d{3})?\s*[–—-]\s*", "", o.get("usina") or "")
+    return mesma_usina(assinatura(rot), assinatura(nome))
+
+
 def eh_normalizacao(t):
     """t sem acento. True só quando a mensagem afirma que já normalizou: não vale pergunta ("voltou?"),
     negação ("não retornou"), intenção ("vou restabelecer", "pode informar o religamento") nem
@@ -448,7 +487,9 @@ def eh_normalizacao(t):
             continue
         if re.search(r"\b(precisa|precisam|tem que|tem de|deve estar|devem estar|necessario)\b(?!.*\b(foi|ja)\b)", antes) \
            or re.match(r"\s*\)?,?\s*senao\b", depois):
-            continue  # condição, não fato: "precisa estar com o lado CA energizado (disjuntor CA fechado), senão..."
+            continue
+        if re.match(r"\s*(menos|abaixo|pouco|parcial|limitad|com (alarme|falha|defeito))", depois):
+            continue  # "inversor está gerando menos que os demais": não é normalização  # condição, não fato: "precisa estar com o lado CA energizado (disjuntor CA fechado), senão..."
         # mensagem mista: um problema relatado DEPOIS da solução desfaz a normalização; o que vem antes é a causa
         # ("disjuntor estava desarmado ... foi fechado")
         pos = t.find(f)
@@ -585,6 +626,8 @@ def classificar(t):
     if cog:
         return None if cog == "ignorar" else cog
     if PROGRAMADA.search(t) and "🟥" not in t.split("atividade", 1)[0]:
+        return None
+    if NAO_OCORRENCIA.search(t) and "🟥" not in t and "🟩" not in t:
         return None
     if "🟩" in t and t.rfind("🟩") > t.rfind("🟥"):
         return "normal"  # resumo do COG: "🟥 Ocorrência ... 🟩 Normalização" — terminou normalizada
@@ -899,7 +942,104 @@ def montar_ocorrencias(eventos, usinas, vinculos=None):
     return ocorrencias, todas, boletins
 
 
+# ---------- baixa de ocorrência antiga e pelo Status Operacional ----------
+# o boletim "✅ Em geração / todos os inversores em operação" fala de geração e inversores: não fecha tracker, câmera...
+BOLETIM_COBRE = re.compile(r"inversor|usina|ufv|desarm|disjuntor|52l|comunica|geracao|energia|religa|rearm|parad|deslig")
+BOLETIM_NAO_COBRE = re.compile(r"tracker|\btra\s?\d|camera|cftv|intrus|alarme (da|de) (zona|cerca)|\bzonas?\b|ar condicionado|nobreak|"
+                               r"ventila|cerca|portao|roubo|furto|extintor|\bsensor")
+
+
+def baixa_por_boletim(o, linhas):
+    """Primeira linha "✅ … Em geração" de um Status Operacional, depois do último aviso da ocorrência, que fala da
+    mesma usina. Devolve o normalizado ou None."""
+    sobre = sem_acento(((o.get("msg") or {}).get("texto") or "") + " " + ((o.get("ultimo_msg") or {}).get("texto") or ""))
+    if not BOLETIM_COBRE.search(sobre) or BOLETIM_NAO_COBRE.search(sobre):
+        return None
+    for ln in sorted(linhas, key=lambda x: x["ts"]):
+        if ln["ts"] > o["ultima_ts"] + 1800 and casa_boletim(o, ln["nome"]):
+            return {"ts": int(ln["ts"]), "de": ln.get("de") or "COG", "grupo": ln.get("grupo"), "motivo": "boletim",
+                    "texto": f"Status Operacional: {ln['nome'].upper()} em geração", "id": ln.get("id")}
+    return None
+
+
+def linhas_ok_das_mensagens(msgs):
+    out = []
+    for m in msgs:
+        for ts, nome in linhas_ok(m.get("text") or "", m.get("ts", 0)):
+            out.append({"ts": ts, "nome": nome, "de": m.get("sender"), "id": m.get("id"),
+                        "grupo": (m.get("chat") or {}).get("name") if isinstance(m.get("chat"), dict) else None})
+    return out
+
+
+def _mesmo_nome_exato(a, b):
+    pa, na = assinatura(a)
+    pb, nb = assinatura(b)
+    return bool(pa) and pa == pb and na == nb
+
+
+def revisar_antigas(abertas, usinas=None, dias=14, log=print):
+    """Ocorrências antigas ainda abertas (fora da janela de leitura): relê os grupos delas desde o último aviso e
+    procura a normalização que a janela curta não viu (o técnico disse "Ufv Ok", "usina rearmada"...).
+    Devolve ({chave: normalizado}, linhas do Status Operacional dos últimos `dias`)."""
+    linhas = []
+    try:
+        d = wa("search", "Status Operacional", "--days", str(dias), "--limit", "200", timeout=120)
+        linhas = linhas_ok_das_mensagens(d.get("hits") or [])
+    except Exception as e:
+        log(f"revisão: boletins não lidos ({e})")
+    lidos, achadas = {}, {}
+    grupo_de = {u["jid"]: u for u in usinas or []}  # grupos de usina do quadro
+    for o in abertas:
+        critica = o.get("sev") == "critico"
+        cod = o.get("codigo")
+        rot = re.sub(r"^[A-Z]{2,4}\d{3}(/\d{3})?\s*[–—-]\s*", "", o.get("usina") or "")
+        sobre = sem_acento(((o.get("msg") or {}).get("texto") or "") + " " + ((o.get("ultimo_msg") or {}).get("texto") or ""))
+        especifico = BOLETIM_NAO_COBRE.search(sobre)  # tracker, câmera, zona de alarme...: a baixa tem que falar disso
+        # aberta pelo acionamento do COG: vale a normalização dita até 15 min antes (o técnico rearmou e a OS veio depois)
+        desde = o["inicio_ts"] - 900 if COG_DISPARO.search(sem_acento((o.get("msg") or {}).get("texto") or "")) and o.get("qtd", 1) <= 2 \
+            else o["ultima_ts"]
+        for jid in o.get("jids") or [o.get("jid")]:
+            if jid not in lidos:
+                ini = dt.datetime.fromtimestamp(min(x["inicio_ts"] - 900 for x in abertas if jid in (x.get("jids") or []))).astimezone()
+                try:
+                    r = wa("read", jid, "--since", ini.isoformat(timespec="minutes"), "--limit", "1000", timeout=120)
+                    lidos[jid] = (r.get("messages") or [], (r.get("chat") or {}).get("name") or "")
+                except Exception:
+                    lidos[jid] = ([], "")
+            msgs, nome_grupo = lidos[jid]
+            g = grupo_de.get(jid)
+            # grupo da própria usina ("Guarantã do Norte-MT Gerar" para GNO100 – Guarantã do Norte): vale sem citar o nome
+            do_grupo = jid == o.get("chave_usina") or bool(g and cod and g.get("codigo") and chave_codigo(g["codigo"]) == chave_codigo(cod)) \
+                or bool(nome_grupo and rot and mesma_usina(assinatura(rotulo_usina(nome_grupo)), assinatura(rot)))
+            for m in msgs:
+                if m.get("ts", 0) <= desde:
+                    continue
+                bruto = texto(m)
+                t = sem_acento(bruto)
+                if not t or "🟥" in t or classificar_manutencao(bruto) or not eh_normalizacao(t) or desmentida(m, msgs):
+                    continue
+                if especifico and not BOLETIM_NAO_COBRE.search(t):
+                    continue  # "Inversor 1.5 religado" não fecha "zonas com alarme disparado"
+                if critica and (so_comunicacao(t) or re.search(r"normalizacao:\s*inversor", t)):
+                    continue  # voltou a comunicação ou um inversor: não diz que a usina desarmada voltou
+                if not do_grupo:  # grupo geral: só vale se a mensagem diz qual usina
+                    c = CODIGO.search(bruto)
+                    nome = extrair_nome_usina(bruto)
+                    if not ((c and cod and chave_codigo(c.group(1)) == chave_codigo(cod)) or
+                            (nome and _mesmo_nome_exato(nome, rot))):
+                        continue
+                achadas[o["chave"]] = {"ts": m["ts"], "de": m.get("sender") or "?", "texto": bruto[:300], "id": m.get("id"),
+                                       "motivo": "cog" if NORMAL_COG.search(t) else "mensagem", "revisada": True}
+                break
+            if o["chave"] in achadas:
+                break
+    log(f"revisão de ocorrências antigas: {len(abertas)} abertas, {len(achadas)} com normalização encontrada, "
+        f"{len(linhas)} linhas de Status Operacional")
+    return achadas, linhas
+
+
 ATIVIDADE_MAX = 12 * 3600  # atividade sem "concluída" depois disso: o painel pergunta "Ainda em manutenção?"
+ATIVIDADE_SEM_FIM = 24 * 3600  # e depois disso sai sozinha, como "sem registro de término" (o COG quase nunca avisa)
 PRESENCA_MAX = 14 * 3600   # entrada sem saída depois disso deixa de contar como "em campo"
 
 
@@ -1087,6 +1227,9 @@ def coletar(cache=None, dias=DIAS, log=print):
     return {"quando": int(time.time()), "whatsapp": status(), "pendentes": pendentes,
             "ocorrencias": ocorrencias[:120], "usinas": usinas, "boletins": boletins[:6], "codigos": codigos,
             "normalizacoes": getattr(montar_ocorrencias, "normalizacoes", [])[-300:],
+            "linhas_ok": [ln for b in boletins for ln in linhas_ok_das_mensagens(
+                [{"text": b.get("completo") or b["msg"].get("texto"), "ts": b["ts"], "sender": b["msg"].get("de"),
+                  "id": b.get("id"), "chat": {"name": b.get("grupo")}}])],
             "atividades": atividades[:80], "presencas": presencas[:120], "feed": feed[:60], "atividade": atividade,
             "chamados": chamados, "tarefas": tarefas, "erros": erros}
 
