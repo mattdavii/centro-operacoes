@@ -7,6 +7,15 @@ import coletor
 erros = 0
 
 DA_BAIXA = [
+    # 27/11: frases que ficaram abertas no painel
+    "Limitação retirada.",
+    "Inversores entraram em produção",
+    "Rele da cabine 01 que estava sem comunicação, resolvido também",
+    "Problema da marcação errada, resolvido.",
+    "@COG para fins de registro verifiquei Aracanguá 200 e aí da está em cima, sem anomalias.",
+    "tudo gerando",
+    "@COG atividade na UFV-Olho das flores concluída, feito troca do disjuntor do inversor 04 barramento fase-S",
+    "antes de saída passei na coroados 200 para realizar a verificação, a usina se encontra operando!",
     "*UFV GOY700 – GOY700* *🔌🟩 Normalização: Disjuntor 52L Fechado* > Proteção atuada: em análise",
     "* *UFV RIO100 – L'oreal RJ* *🔌🟩 Normalização: Usina restabelecida* > Horário de restabelecimento: 15h05min",
     "UFV Monsenhor Tabosa religada.",
@@ -42,6 +51,14 @@ DA_BAIXA = [
     "* *UFV QSS100 – Quissamã 100* *🔌🟥 Ocorrência: Disjuntor 52L aberto* > Proteções atuadas: > • 27 (Subtensão) > Horário do desarme: 18h26min *🔌🟩 Normalização: Disjuntor 52L Fechado* > Horário de fechamento: 19h02min",
 ]
 NAO_DA_BAIXA = [
+    "ainda não foi resolvido",
+    "foi resolvido?",
+    "aguardando ser resolvido",
+    "a limitação será retirada amanhã",
+    "inversores não entraram em produção",
+    "tudo gerando menos o inversor 3",
+    "troca do disjuntor será concluída amanhã",
+    "aparentemente resolvido",
     "esta normalizando por aqui",
     "o inversor precisa estar com o lado CA energizado (disjuntor CA fechado), senão o MBUS não fala.",
     "inversor 3 ainda não está em operação",

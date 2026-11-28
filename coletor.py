@@ -272,7 +272,16 @@ NORMAL_FATO = re.compile(
     r"\b(ufv|usina)\s+(\w+\s+){0,2}ok\b|\btudo (esta |segue )?(normal|ok)\b|"
     r"\b(ufvs?|usinas?)\b(?:(?!\b(nao|sem|ainda)\b)[^.?!]){0,40}\bem (operacao|geracao)\b|"
     r"\b(rele|logger|datalogger|usina|ufv|inversor\w*)( lt| \d+)?\s+(\w+\s+)?comunicando\b|"
-    r"\b(100 ?%|totalmente|plenamente) operaciona|\b(foi|foram) (reparad|corrigid)\w*")
+    r"\b(100 ?%|totalmente|plenamente) operaciona|\b(foi|foram) (reparad|corrigid)\w*|"
+    # "Limitação retirada", "Inversores entraram em produção", "resolvido também", "está em cima, sem anomalias",
+    # "tudo gerando", "Todas as câmeras em funcionamento", "atividade concluída, feito troca do disjuntor",
+    # "a usina se encontra operando"
+    r"\blimitac\w* (foi )?(retirad|removid)\w*|\bretirad[oa] a limitac|"
+    r"\b(entrou|entraram) em (producao|operacao|geracao)\b|\bresolvid[oa]s?\b|"
+    r"\b(ja )?(esta|estao|segue|seguem) em cima\b|"
+    r"\b(tudo|todos( os inversores)?|todas( as cameras)?) (gerando|em funcionamento|funcionando|operando)\b|"
+    r"\b(atividade|manutencao|servico|troca|substituicao|reparo)\b(?:(?!\b(sera|serao|vai|vao|deve|devem|ainda|nao|ate|quando|apos)\b)[^.?!]){0,40}\bconcluid[oa]|"
+    r"\b(se )?encontram?(-se)? (operando|gerando|em funcionamento)\b")
 # o que desfaz a afirmação, quando aparece pouco antes da palavra
 NEGACAO = re.compile(r"\b(nao|n|nem|nunca|sem|ainda nao)\s+(\w+\s+){0,2}$")
 INTENCAO = re.compile(r"\b(vou|vamos|irei|iremos|vai|vao|para|pra|se|posso|pode|podemos|podem|aguardando|aguardar|"
@@ -446,9 +455,9 @@ VOLTA_USINA = re.compile(r"\b(religad|rearmad|restabelecid|reestabelecid|normali
 
 
 def so_comunicacao(t):
-    """A normalização fala só da comunicação ("comunicação do relé LT retornou"), sem dizer que a usina voltou a gerar?
+    """A normalização fala só da comunicação ("comunicação do relé LT retornou") ou de câmera/tracker, sem dizer que a usina voltou a gerar?
     Isso fecha alerta de comunicação, mas não uma crítica de desarme."""
-    return bool(re.search(r"comunica|logger|scada|monitoramento|online|sinal", t)) and not VOLTA_USINA.search(t)
+    return bool(re.search(r"comunica|logger|scada|monitoramento|online|sinal|camera|cftv|tracker", t)) and not VOLTA_USINA.search(t)
 
 
 LINHA_OK = re.compile(r"✅\W*(?:ufv\s+)?(.{2,60}?)\s*[–—-]\s*em geracao")
@@ -534,6 +543,20 @@ def chave_codigo(c):
     """CAR101 e CAR100 → CAR1 (mesma regra do mapa)."""
     m = re.match(r"^([A-Z]{2,4})(\d)", str(c or "").split("/")[0].strip().upper())
     return m.group(1) + m.group(2) if m else None
+
+
+def chaves_codigo(c):
+    """Todas as chaves de um código composto: "BVI100/200" → {BVI1, BVI2}; "ARA100 / ARA300" → {ARA1, ARA3}."""
+    partes = [x.strip().upper() for x in str(c or "").split("/") if x.strip()]
+    m = re.match(r"^([A-Z]{2,4})", partes[0]) if partes else None
+    saida = set()
+    for x in partes:
+        if re.fullmatch(r"\d{3}", x) and m:
+            x = m.group(1) + x
+        k = chave_codigo(x)
+        if k:
+            saida.add(k)
+    return saida
 
 
 COG_REMETENTE = re.compile(r"\bcog\b|centro (de )?operac")
@@ -1064,7 +1087,7 @@ def revisar_antigas(abertas, usinas=None, dias=14, log=print):
                 if not do_grupo:  # grupo geral: só vale se a mensagem diz qual usina
                     c = CODIGO.search(bruto)
                     nome = extrair_nome_usina(bruto)
-                    if not ((c and cod and chave_codigo(c.group(1)) == chave_codigo(cod)) or
+                    if not ((c and cod and chave_codigo(c.group(1)) in chaves_codigo(cod)) or
                             (nome and _mesmo_nome_exato(nome, rot))):
                         continue
                 achadas[o["chave"]] = {"ts": m["ts"], "de": m.get("sender") or "?", "texto": bruto[:300], "id": m.get("id"),
